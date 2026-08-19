@@ -73,7 +73,7 @@ const CHARS = [
     climb:true, dash:true, tough:true,
     blurb:"Can't jump — tap INK to dash! Climbs walls and oozes through danger." },
   { key:"fish", name:"Fish", emoji:"🐠", color:"#f0a030", faceDir:-1,
-    run:2.2, accel:0.4, jump:13, grav:1,
+    run:2.7, accel:0.45, jump:13, grav:1,
     swim:true, swimRun:5.6, airSpan:600,
     blurb:"Slow flopping on land, super fast in water — find water every 10 seconds!" },
 ];
@@ -84,9 +84,9 @@ const CHARS = [
 const LEVEL_NAME = "Down in the Jungle";
 const SCORE_KEY = "animalandia_scores_jungle";
 
-const START_LINE = 5450;
-const FINISH_LINE = 6800;
-const WORLD_END = 7200;
+const START_LINE = 5600;
+const FINISH_LINE = 6950;
+const WORLD_END = 7350;
 
 const SOLIDS = [
   // ground, split either side of the poison river
@@ -99,23 +99,22 @@ const SOLIDS = [
   // spider-web trampoline, then the volcano to clear
   { x:3620, y:450, w:90, h:20, type:"web" },
   { x:3760, y:290, w:130, h:180, type:"volcano" },
-  // floating leaves you hop over
-  { x:4250, y:415, w:80, h:55, type:"leaf" },
-  { x:4560, y:415, w:80, h:55, type:"leaf" },
-  { x:4990, y:415, w:80, h:55, type:"leaf" },
+  // floating leaves you hop over — kept well clear of the low leaves below,
+  // so there is always room to land and get down before the next one
+  { x:4260, y:415, w:80, h:55, type:"leaf" },
+  { x:4960, y:415, w:80, h:55, type:"leaf" },
 ];
 
 const HAZARDS = [
-  // quicksand pits
-  { x:2300, y:452, w:90,  h:24, kind:"quicksand" },
-  { x:2600, y:452, w:100, h:24, kind:"quicksand" },
-  { x:2850, y:452, w:90,  h:24, kind:"quicksand" },
+  // quicksand pits, each with a puddle just before it to launch from
+  { x:2310, y:452, w:80, h:24, kind:"quicksand" },
+  { x:2570, y:452, w:80, h:24, kind:"quicksand" },
+  { x:2830, y:452, w:80, h:24, kind:"quicksand" },
   // poison river — jump it, unless you are the octopus
   { x:3200, y:470, w:90, h:70, kind:"poison" },
   // low leaves — hold DUCK or you bang your head
-  { x:4420, y:380, w:100, h:56, kind:"lowleaf" },
-  { x:4840, y:380, w:100, h:56, kind:"lowleaf" },
-  { x:5120, y:380, w:100, h:56, kind:"lowleaf" },
+  { x:4560, y:380, w:100, h:56, kind:"lowleaf" },
+  { x:5340, y:380, w:100, h:56, kind:"lowleaf" },
 ];
 
 // shallow jungle pools: harmless to everyone, but the fish refills its air
@@ -123,22 +122,29 @@ const HAZARDS = [
 const WATERS = [
   { x:60,   w:500 },  // the water path you start in
   { x:1000, w:120 },
-  { x:1600, w:110 },  // a breather in the middle of the rolling logs
-  { x:2050, w:110 },
-  { x:2420, w:110 },  // between the quicksand pits
+  { x:1150, w:730 },  // the water path — the logs come rolling down this stream
+  { x:2050, w:240 },  // long run-up pool before the first quicksand
+  { x:2430, w:110 },  // a launch puddle before each of the other pits
+  { x:2690, w:110 },
   { x:3020, w:160 },  // launch pool — build up speed for the poison river
   { x:3480, w:130 },  // launch pool — build up speed for the trampoline
   { x:3950, w:120 },
-  { x:4640, w:120 },  // a breather in the middle of the leaves
-  { x:5250, w:120 },
-  { x:5700, w:110 },  // three pools along the race straight
-  { x:6150, w:110 },
-  { x:6550, w:110 },
+  { x:4720, w:120 },  // a breather in the middle of the leaves
+  { x:5470, w:120 },
+  { x:5850, w:110 },  // three pools along the race straight
+  { x:6300, w:110 },
+  { x:6700, w:110 },
 ];
 const WATER_H = 30;
 
 // rolling logs: spawn on the right of the zone and roll left, 1 second apart
-const LOG_ZONE = { x0:1140, x1:2000, speed:2.6, interval:60, w:74, h:46 };
+const LOG_ZONE = { x0:1140, x1:1860, speed:2.4, interval:105, w:74, h:46 };
+
+// the volcano throws fireballs out of its crater every 3 seconds
+const VOLCANO = SOLIDS.find(s => s.type === "volcano");
+const ERUPT_INTERVAL = 180;   // 3 seconds
+const ERUPT_WARN = 45;        // the crater glows this long before it blows
+const FIRE_R = 12;
 
 // checkpoints: {trigger x, respawn x}
 const CHECKPOINTS = [
@@ -148,7 +154,9 @@ const CHECKPOINTS = [
   { tx:3120, rx:3120 },
   { tx:3560, rx:3560 },
   { tx:4150, rx:4150 },
-  { tx:5380, rx:5380 },
+  { tx:4700, rx:4700 },
+  { tx:5100, rx:5100 },
+  { tx:5450, rx:5450 },
 ];
 
 const SIGNS = [
@@ -159,7 +167,7 @@ const SIGNS = [
   { x:3120, text:"POISON RIVER!" },
   { x:3560, text:"BOUNCE OVER THE VOLCANO!" },
   { x:4160, text:"JUMP OVER, DUCK UNDER!" },
-  { x:5420, text:"RACE THE GECKO!" },
+  { x:5570, text:"RACE THE GECKO!" },
 ];
 
 // decorative jungle trees
@@ -345,6 +353,8 @@ const sfx = {
   record:  () => { [784,988,1175,1568].forEach((f,i)=>setTimeout(()=>beep(f,0.16,"triangle",0.16), i*90)); },
   dash:    () => { beep(960,0.07,"sine",0.12); setTimeout(()=>beep(520,0.13,"sine",0.10),45); },
   boing:   () => { beep(300,0.08,"sine",0.12); setTimeout(()=>beep(720,0.12,"sine",0.11),55); },
+  erupt:   () => { beep(90,0.32,"sawtooth",0.13); setTimeout(()=>beep(150,0.22,"sawtooth",0.10),90); },
+  burn:    () => { beep(240,0.16,"sawtooth",0.14); setTimeout(()=>beep(150,0.2,"sawtooth",0.12),80); },
   select:  () => beep(700, 0.08, "triangle", 0.12),
 };
 
@@ -431,6 +441,8 @@ let lastRank = -1;   // leaderboard index of the last run (-1 = not top 10)
 let inkParts = [];   // octopus ink cloud + water splashes
 let logs = [];       // rolling logs
 let logSpawn = 0;
+let fireballs = [];  // volcano eruption
+let eruptTimer = ERUPT_INTERVAL;
 
 const player = {
   x: 80, y: GROUND_Y - PH, w: PW, h: PH,
@@ -466,6 +478,7 @@ function resetPlayer(ch){
   player.air = ch.airSpan || 0; player.inWater = false;
   inkParts.length = 0;
   logs.length = 0; logSpawn = 0;
+  fireballs.length = 0; eruptTimer = ERUPT_INTERVAL;
   gecko.x = START_LINE - 90; gecko.y = GROUND_Y - gecko.h;
   raceStarted = false;
   runMs = 0; lastRank = -1;
@@ -589,8 +602,9 @@ function updatePlayer(allowInput){
   const accel = a.accel;
   if (dir !== 0){
     if (Math.abs(player.vx) > maxSpeed){
-      // boosted above top speed (dash / slingshot / leaving a pool) — ease back
-      player.vx += (player.vx > 0 ? -0.3 : 0.3);
+      // boosted above top speed (dash / slingshot / rocketing out of a pool)
+      // — bleed off gently so the launch actually carries you somewhere
+      player.vx += (player.vx > 0 ? -0.12 : 0.12);
     } else {
       player.vx += dir * accel;
       if (player.vx >  maxSpeed) player.vx =  maxSpeed;
@@ -687,9 +701,9 @@ function updatePlayer(allowInput){
         player.x -= LOG_ZONE.speed;   // the log carries you back as it rolls
       } else if (player.hitCool <= 0){
         sfx.bump();
-        player.vx = -4; player.vy = -5;
+        player.vx = -2.6; player.vy = -4;
         player.grounded = false;
-        player.hurtFlash = 40; player.hitCool = 45;
+        player.hurtFlash = 40; player.hitCool = 50;
       }
     }
   }
@@ -708,6 +722,17 @@ function updatePlayer(allowInput){
       if (hz.kind === "lowleaf" && player.ducking) continue;  // ducked = you slip underneath
       if (overlaps(player, hz)){
         if (hz.kind === "poison") sfx.splash(); else sfx.bump();
+        respawn();
+        return;
+      }
+    }
+  }
+
+  // --- volcano fireballs ---
+  if (!a.tough){
+    for (const f of fireballs){
+      if (overlaps(player, { x:f.x-FIRE_R, y:f.y-FIRE_R, w:FIRE_R*2, h:FIRE_R*2 })){
+        sfx.burn();
         respawn();
         return;
       }
@@ -760,6 +785,27 @@ function updateLogs(){
 }
 
 // ------------------------------------------------------------------
+// Volcano
+// ------------------------------------------------------------------
+function updateVolcano(){
+  eruptTimer--;
+  if (eruptTimer <= 0){
+    eruptTimer = ERUPT_INTERVAL;
+    const cx = VOLCANO.x + VOLCANO.w/2;
+    for (let i = -1; i <= 1; i++){
+      fireballs.push({
+        x: cx + i*13, y: VOLCANO.y - 8,
+        vx: i*1.15, vy: -12 - Math.random()*1.4,
+        spin: Math.random()*6,
+      });
+    }
+    if (Math.abs(player.x - cx) < 900) sfx.erupt();
+  }
+  for (const f of fireballs){ f.x += f.vx; f.y += f.vy; f.vy += 0.35; f.spin += 0.3; }
+  if (fireballs.length) fireballs = fireballs.filter(f => f.y < H + 60);
+}
+
+// ------------------------------------------------------------------
 // Update dispatch
 // ------------------------------------------------------------------
 function update(){
@@ -771,7 +817,10 @@ function update(){
   for (const p of inkParts){ p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life++; }
   if (inkParts.length) inkParts = inkParts.filter(p => p.life < p.max);
 
-  if (state === "playing" || state === "countdown" || state === "race") updateLogs();
+  if (state === "playing" || state === "countdown" || state === "race"){
+    updateLogs();
+    updateVolcano();
+  }
 
   if (state === "playing"){
     updatePlayer(true);
@@ -1021,9 +1070,20 @@ function drawSolid(s){
     ctx.moveTo(x + s.w*0.22, y); ctx.lineTo(x + s.w*0.78, y);
     ctx.lineTo(x + s.w*0.66, y+16); ctx.lineTo(x + s.w*0.34, y+16);
     ctx.closePath(); ctx.fill();
-    // glowing crater + drifting smoke
-    ctx.fillStyle = "#ff8b2b";
-    rr(x + s.w*0.3, y - 4, s.w*0.4, 12, 6); ctx.fill();
+    // glowing crater — it swells and brightens just before an eruption
+    const warn = eruptTimer < ERUPT_WARN ? 1 - eruptTimer / ERUPT_WARN : 0;
+    const grow = warn * 8;
+    ctx.fillStyle = warn > 0 ? ((tGlobal >> 2) % 2 ? "#fff0a0" : "#ff5a1e") : "#ff8b2b";
+    rr(x + s.w*0.3 - grow, y - 4 - grow*0.5, s.w*0.4 + grow*2, 12 + grow, 6); ctx.fill();
+    if (warn > 0){
+      ctx.save();
+      ctx.globalAlpha = warn * 0.5;
+      ctx.fillStyle = "#ff8b2b";
+      ctx.beginPath();
+      ctx.arc(x + s.w/2, y, 26 + warn*16, 0, 7);
+      ctx.fill();
+      ctx.restore();
+    }
     for (let i=0;i<4;i++){
       const t = (tGlobal*0.6 + i*40) % 160;
       ctx.fillStyle = "rgba(190,190,190," + (0.35 * (1 - t/160)).toFixed(3) + ")";
@@ -1157,6 +1217,32 @@ function drawLogs(){
     ctx.beginPath(); ctx.ellipse(-LOG_ZONE.w/2 + 11, 0, 8, LOG_ZONE.h/2 - 4, 0, 0, 7); ctx.fill();
     ctx.strokeStyle = "#5f4020"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.ellipse(-LOG_ZONE.w/2 + 11, 0, 4, LOG_ZONE.h/2 - 10, 0, 0, 7); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawFireballs(){
+  for (const f of fireballs){
+    const x = worldX(f.x);
+    if (x < -60 || x > W+60) continue;
+    ctx.save();
+    // smoky trail
+    for (let i = 1; i <= 3; i++){
+      ctx.globalAlpha = 0.26 / i;
+      ctx.fillStyle = "#ff7a1e";
+      ctx.beginPath();
+      ctx.arc(x - f.vx*i*2.2, f.y - f.vy*i*2.2, FIRE_R * (1 - i*0.16), 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // outer flame
+    ctx.fillStyle = "#ff5a1e";
+    ctx.beginPath(); ctx.arc(x, f.y, FIRE_R + 3, 0, 7); ctx.fill();
+    // hot core, wobbling so it reads as fire
+    ctx.fillStyle = "#ffb020";
+    ctx.beginPath(); ctx.arc(x, f.y, FIRE_R - 1 + Math.sin(f.spin)*1.5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff0a0";
+    ctx.beginPath(); ctx.arc(x - 1, f.y - 2, FIRE_R*0.45, 0, 7); ctx.fill();
     ctx.restore();
   }
 }
@@ -1609,6 +1695,7 @@ function render(){
   drawWater();
   for (const hz of HAZARDS) drawHazard(hz);
   drawLogs();
+  drawFireballs();
   drawCheckpoints();
   drawStartFinish();
   drawSigns();
@@ -1648,16 +1735,6 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-
-// TEMP dev hook for testing — remove before shipping
-window.__dev = {
-  get state(){ return state; }, set state(v){ state = v; },
-  player, gecko, CHARS, Leaderboard, SOLIDS, HAZARDS, WATERS, LOG_ZONE, CHECKPOINTS,
-  get logs(){ return logs; },
-  get runMs(){ return runMs; },
-  pick(i){ resetPlayer(CHARS[i]); state = "playing"; },
-  tp(x){ player.x = x; player.y = GROUND_Y - PH - 10; player.vx = 0; player.vy = 0; },
-};
 
 })();
 </script>
