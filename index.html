@@ -2,25 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Desenia Animal Dash</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>Animalandia</title>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%;
-    background: #1b2440;
+    background: #10240f;
     overflow: hidden;
     font-family: "Comic Sans MS", "Baloo", "Trebuchet MS", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    overscroll-behavior: none;
   }
   #wrap {
     position: fixed; inset: 0;
     display: flex; align-items: center; justify-content: center;
   }
   canvas {
-    background: #87ceeb;
+    background: #7fd0c8;
     image-rendering: auto;
     box-shadow: 0 10px 40px rgba(0,0,0,0.5);
     max-width: 100%; max-height: 100%;
     border-radius: 8px;
+    touch-action: none;
   }
 </style>
 </head>
@@ -44,316 +51,138 @@ const DASH_SPEED = 7.5;       // octopus ink-jet dash velocity
 const DASH_TIME = 30;         // frames a dash lasts (~0.5s)
 const DASH_COOLDOWN = 190;    // frames before the next dash is ready (~3.2s)
 const SLINGSHOT_SPEED = 4.6;  // forward launch when the octopus crawls over a top
-const BOUNCE_VY = 16;         // launch speed from a bounce pad
-const FLY_TIME = 210;         // default frames a once-per-run flight lasts (~3.5s)
-const PW = 40, PH = 44; // player hitbox
+const BOUNCE_VY = 16;         // launch speed from the spider-web trampoline
+const PW = 40, PH = 44;       // player hitbox standing
+const PH_DUCK = 22;           // player hitbox ducked
+const DUCK_SPEED = 0.55;      // speed multiplier while ducked
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 // ------------------------------------------------------------------
-// Animals
+// Characters
 // ------------------------------------------------------------------
 // faceDir = the direction the emoji art naturally points (-1 left, 1 right/front).
 // The renderer mirrors it so the character always faces the way it is moving.
-const ANIMALS = [
-  { key:"horse",   name:"Horse",   emoji:"🐎", color:"#c8772f", faceDir:-1,
-    run:4.2, accel:0.6, jump:11.5, grav:1,
-    blurb:"Fast runner — best in the cow race!" },
-  { key:"rabbit",  name:"Rabbit",  emoji:"🐇", color:"#dcd5c8", faceDir:-1,
-    run:3.6, accel:0.55, jump:14, grav:1,
-    blurb:"Big jumper — hops over anything." },
-  { key:"frog",    name:"Frog",    emoji:"🐸", color:"#5cb85c", faceDir:1,
-    run:3.2, accel:0.5, jump:14.5, grav:0.82,
-    blurb:"Floaty jumps — easiest to control." },
-  { key:"dog",     name:"Dog",     emoji:"🐕", color:"#caa05a", faceDir:-1,
-    run:3.9, accel:0.6, jump:11, grav:1, runup:true, distract:true,
-    blurb:"Quick! But gets distracted. Needs a run-up for tall jumps." },
+const CHARS = [
+  { key:"tiger", name:"Tiger", emoji:"🐯", color:"#e8912f", faceDir:1,
+    run:4.6, accel:0.65, jump:11, grav:1, pounce:true,
+    blurb:"Fastest of all! Run fast before you JUMP for a huge pounce." },
   { key:"octopus", name:"Octopus", emoji:"🐙", color:"#b15bd0", faceDir:1,
-    run:2.9, accel:0.45, jump:0, grav:1, climb:true, spikeImmune:true, dash:true, slip:true, swim:true,
-    blurb:"Slow walker — tap JUMP to INK-DASH! Climbs and swims anywhere." },
-];
-
-// Candyfloss Land roster: same play-feel slots as the classic five, new friends.
-const ANIMALS_CANDY = [
-  { key:"unicorn", name:"Unicorn", emoji:"🦄", color:"#f0a8e0", faceDir:-1,
-    run:4.2, accel:0.6, jump:11.5, grav:1,
-    flyOnce:true, flyCharges:2, flyTime:160, flyRise:-2.8, sparkle:"255,215,120",
-    blurb:"Fast — and can FLY twice! Press JUMP in the air, hold to soar." },
-  { key:"fairy",   name:"Fairy",   emoji:"🧚", color:"#a8e0a0", faceDir:-1,
-    run:3.6, accel:0.55, jump:14, grav:0.9,
-    flyOnce:true, flyTime:340, flyRise:-1.7, sparkle:"255,170,230",
-    blurb:"Big jumps — and one long, low FLIGHT! Press JUMP in the air." },
-  { key:"smurf",   name:"Smurf",   emoji:"🧞", color:"#5a9fe0", faceDir:1,
-    run:3.2, accel:0.5, jump:14.5, grav:0.82,
-    blurb:"Floaty jumps — easiest to control." },
-  { key:"kitten",  name:"Kitten",  emoji:"🐈", color:"#e0b070", faceDir:-1,
-    run:3.9, accel:0.6, jump:11, grav:1, runup:true, distract:true,
-    blurb:"So cute! But chases butterflies. Needs a run-up for big jumps." },
-  ANIMALS[4], // the octopus goes everywhere
-];
-
-// Snowy Mountain roster: the dog becomes a husky (wolf emoji — no husky emoji exists).
-const ANIMALS_SNOW = [
-  ANIMALS[0], ANIMALS[1], ANIMALS[2],
-  { key:"husky", name:"Husky", emoji:"🐺", color:"#c9d4dd", faceDir:-1,
-    run:3.9, accel:0.6, jump:11, grav:1, runup:true, distract:true,
-    blurb:"Loves the snow! But gets distracted. Needs a run-up for tall jumps." },
-  ANIMALS[4],
+    run:2.9, accel:0.45, jump:0, grav:1,
+    climb:true, dash:true, tough:true,
+    blurb:"Can't jump — tap INK to dash! Climbs walls and oozes through danger." },
+  { key:"fish", name:"Fish", emoji:"🐠", color:"#f0a030", faceDir:-1,
+    run:2.2, accel:0.4, jump:13, grav:1,
+    swim:true, swimRun:5.6, airSpan:600,
+    blurb:"Slow flopping on land, super fast in water — find water every 10 seconds!" },
 ];
 
 // ------------------------------------------------------------------
-// Level data (world coordinates)
+// Level: "Down in the Jungle"
 // ------------------------------------------------------------------
-const THEMES = {
-  meadow: {
-    skyTop:"#7ec8f0", skyBottom:"#cdeafc",
-    hillFar:"#9bd17a", hillNear:"#86c267",
-    dirt:"#7a4b22", top:"#5fa83f", topDark:"#4e9233",
-    beam:"#caa05a", beamStroke:"#8a6a2e",
-    spikeFill:"#9aa3ad", spikeStroke:"#6b7480",
-    plat:"#6cbb4a", platTop:"#7fd15a", platStroke:"#4e9233",
-    snow:false,
-  },
-  snow: {
-    skyTop:"#6fa3d8", skyBottom:"#e8f4fd",
-    hillFar:"#e9f3fb", hillNear:"#d3e6f4",
-    dirt:"#6d7d8e", top:"#f4faff", topDark:"#cfe2f0",
-    beam:"#bfe8ff", beamStroke:"#6fa8cc",
-    spikeFill:"#6fc4f0", spikeStroke:"#2c6aa8",
-    plat:"#7fc8e8", platTop:"#b3e3f7", platStroke:"#4b96c4",
-    snow:true,
-  },
-  candy: {
-    skyTop:"#ffd3ec", skyBottom:"#fff3fb",
-    hillFar:"#ffc7e6", hillNear:"#f7a8d8",
-    dirt:"#9c5a7d", top:"#ff9fd6", topDark:"#e878ba",
-    beam:"#ffb3d9", beamStroke:"#d66aa8",
-    spikeFill:"#ff8ac2", spikeStroke:"#c2508e",
-    plat:"#b98aff", platTop:"#d9bfff", platStroke:"#8a5ad0",
-    water:"rgba(122,74,40,0.85)", // chocolate!
-    snow:false, rainbows:true,
-  },
-};
+const LEVEL_NAME = "Down in the Jungle";
+const SCORE_KEY = "animalandia_scores_jungle";
 
-const LEVELS = [
-  {
-    name:"Sunny Meadow", icon:"🌳", theme:THEMES.meadow,
-    blurb:"Run, jump, climb and race the cow!",
-    scoreKey:"desenia_animal_dash_scores", // original key — keeps old best times
-    startLine:4660, finishLine:6000, worldEnd:6400,
-    solids:[
-      { x:-200, y:GROUND_Y, w:6800, h:300, type:"ground" },
-      // run around — gentle bumps
-      { x:520,  y:440, w:120, h:30, type:"platform" },
-      { x:760,  y:425, w:130, h:45, type:"platform" },
-      { x:1010, y:445, w:120, h:25, type:"platform" },
-      // big hurdle
-      { x:1320, y:360, w:46, h:110, type:"wall" },
-      // climb up — staircase (leads straight onto the downhill slope)
-      { x:1640, y:430, w:80, h:40,  type:"step" },
-      { x:1720, y:390, w:80, h:80,  type:"step" },
-      { x:1800, y:350, w:80, h:120, type:"step" },
-      { x:1880, y:310, w:80, h:160, type:"step" },
-      // balance beam
-      { x:3750, y:410, w:550, h:60, type:"beam" },
-      // spinner
-      { x:4380, y:440, w:150, h:30, type:"spinner" },
-    ],
-    // downhill ramp from the top of the stairs down to the ground
-    slopes:[ { x0:1960, y0:310, x1:2700, y1:GROUND_Y } ],
-    hazards:[
-      { x:2950, y:440, w:40, h:30, kind:"spike" },
-      { x:3150, y:440, w:40, h:30, kind:"spike" },
-      { x:3350, y:440, w:40, h:30, kind:"spike" },
-      { x:3750, y:467, w:550, h:6, kind:"water" }, // only reached if you fall off the beam
-    ],
-    // checkpoints: {trigger x, respawn x}
-    checkpoints:[
-      { tx:1240, rx:1240 },
-      { tx:1560, rx:1560 },
-      { tx:2820, rx:2820 },
-      { tx:3650, rx:3650 },
-    ],
-    signs:[
-      { x:360,  text:"RUN AROUND →" },
-      { x:1190, text:"JUMP OVER!" },
-      { x:1560, text:"CLIMB UP!" },
-      { x:2080, text:"RUN DOWNHILL!" },
-      { x:2880, text:"JUMP THE SPIKES!" },
-      { x:3680, text:"BALANCE — KEEP MOVING!" },
-      { x:4360, text:"SPIN!" },
-      { x:4660, text:"RACE THE COW!" },
-    ],
-    // decorative loop swirls for "run around" / "spin"
-    swirls:[
-      { x:600, y:520, r:34 }, { x:900, y:530, r:42 }, { x:1120, y:520, r:30 },
-    ],
-  },
-  {
-    name:"Snowy Mountain", icon:"🏔️", theme:THEMES.snow,
-    blurb:"Bounce, jump icy ponds and ski the big slope!",
-    scoreKey:"desenia_animal_dash_scores_l2",
-    animals:ANIMALS_SNOW,
-    racer:{ kind:"emoji", name:"polar bear", emoji:"🐻‍❄️" },
-    startLine:6150, finishLine:7500, worldEnd:7900,
-    solids:[
-      // ground with two icy-pond gaps cut into it
-      { x:-200, y:GROUND_Y, w:2600, h:300, type:"ground" },
-      { x:2510, y:GROUND_Y, w:240,  h:300, type:"ground" },
-      { x:2880, y:GROUND_Y, w:5220, h:300, type:"ground" },
-      // pond floors — the octopus swims along these and climbs out the far side
-      { x:2400, y:530, w:110, h:60, type:"ground" },
-      { x:2750, y:530, w:130, h:60, type:"ground" },
-      // bounce-pad warm-up with floating platforms
-      { x:500,  y:450, w:90,  h:20, type:"bounce" },
-      { x:640,  y:330, w:110, h:24, type:"platform" },
-      { x:820,  y:450, w:90,  h:20, type:"bounce" },
-      { x:960,  y:300, w:110, h:24, type:"platform" },
-      // bounce over the tall ice wall
-      { x:1270, y:450, w:70,  h:20, type:"bounce" },
-      { x:1355, y:330, w:46,  h:140, type:"wall" },
-      // climb the mountain — staircase onto the big ski slope
-      { x:3950, y:430, w:80, h:40,  type:"step" },
-      { x:4030, y:390, w:80, h:80,  type:"step" },
-      { x:4110, y:350, w:80, h:120, type:"step" },
-      { x:4190, y:310, w:80, h:160, type:"step" },
-      { x:4270, y:270, w:80, h:200, type:"step" },
-      // ice balance beam
-      { x:5350, y:410, w:450, h:60, type:"beam" },
-      // spinner
-      { x:5900, y:440, w:150, h:30, type:"spinner" },
-    ],
-    // the big ski slope from the mountain top down to the ground
-    slopes:[ { x0:4350, y0:270, x1:5250, y1:GROUND_Y } ],
-    hazards:[
-      // icy ponds in the ground gaps
-      { x:2400, y:486, w:110, h:60, kind:"water" },
-      { x:2750, y:486, w:130, h:60, kind:"water" },
-      // icicles
-      { x:3220, y:440, w:40, h:30, kind:"spike" },
-      { x:3410, y:440, w:40, h:30, kind:"spike" },
-      { x:3600, y:440, w:40, h:30, kind:"spike" },
-      { x:3790, y:440, w:40, h:30, kind:"spike" },
-      // under the ice beam
-      { x:5350, y:467, w:450, h:6, kind:"water" },
-    ],
-    checkpoints:[
-      { tx:1180, rx:1180 },
-      { tx:2300, rx:2300 },
-      { tx:3080, rx:3080 },
-      { tx:3880, rx:3880 },
-      { tx:5280, rx:5280 },
-    ],
-    signs:[
-      { x:360,  text:"BOUNCE! →" },
-      { x:1180, text:"BOUNCE OVER THE WALL!" },
-      { x:2280, text:"JUMP THE ICY PONDS!" },
-      { x:3080, text:"DODGE THE ICICLES!" },
-      { x:3880, text:"CLIMB THE MOUNTAIN!" },
-      { x:4600, text:"SKI DOWN!" },
-      { x:5300, text:"BALANCE ON THE ICE!" },
-      { x:5880, text:"SPIN!" },
-      { x:6150, text:"RACE THE POLAR BEAR!" },
-    ],
-    swirls:[],
-  },
-  {
-    name:"Candyfloss Land", icon:"🍭", theme:THEMES.candy,
-    blurb:"Fly with the unicorn through a world of sweets!",
-    scoreKey:"desenia_animal_dash_scores_l3",
-    animals:ANIMALS_CANDY,
-    racer:{ kind:"candyfloss", name:"candyfloss", emoji:"🍭" },
-    startLine:5400, finishLine:6800, worldEnd:7200,
-    solids:[
-      // ground with the chocolate-river gap cut into it
-      { x:-200, y:GROUND_Y, w:2100, h:300, type:"ground" },
-      { x:2040, y:GROUND_Y, w:5360, h:300, type:"ground" },
-      // river floor — the octopus swims along it and climbs out
-      { x:1900, y:530, w:140, h:60, type:"ground" },
-      // candy warm-up bumps
-      { x:520,  y:440, w:120, h:30, type:"platform" },
-      { x:760,  y:425, w:130, h:45, type:"platform" },
-      { x:1010, y:445, w:120, h:25, type:"platform" },
-      // marshmallow pad over the candy-cane wall (same geometry as level 2's)
-      { x:1250, y:450, w:70,  h:20, type:"bounce" },
-      { x:1335, y:330, w:46,  h:140, type:"wall" },
-      // climb up the cake stairs onto the icing slide
-      { x:3100, y:430, w:80, h:40,  type:"step" },
-      { x:3180, y:390, w:80, h:80,  type:"step" },
-      { x:3260, y:350, w:80, h:120, type:"step" },
-      { x:3340, y:310, w:80, h:160, type:"step" },
-      // liquorice balance beam
-      { x:4300, y:410, w:500, h:60, type:"beam" },
-      // lollipop spinner
-      { x:4950, y:440, w:150, h:30, type:"spinner" },
-    ],
-    slopes:[ { x0:3420, y0:310, x1:4200, y1:GROUND_Y } ],
-    hazards:[
-      // chocolate river
-      { x:1900, y:486, w:140, h:60, kind:"water" },
-      // candy-drop spikes
-      { x:2400, y:440, w:40, h:30, kind:"spike" },
-      { x:2590, y:440, w:40, h:30, kind:"spike" },
-      { x:2780, y:440, w:40, h:30, kind:"spike" },
-      // under the liquorice beam
-      { x:4300, y:467, w:500, h:6, kind:"water" },
-    ],
-    checkpoints:[
-      { tx:1180, rx:1180 },
-      { tx:1780, rx:1780 },
-      { tx:2260, rx:2260 },
-      { tx:3040, rx:3040 },
-      { tx:4230, rx:4230 },
-    ],
-    signs:[
-      { x:360,  text:"CANDY LAND →" },
-      { x:1180, text:"BOUNCE OVER!" },
-      { x:1820, text:"CROSS THE CHOCOLATE RIVER!" },
-      { x:2280, text:"JUMP THE CANDY DROPS!" },
-      { x:3040, text:"CLIMB THE CAKE!" },
-      { x:3620, text:"SLIDE DOWN!" },
-      { x:4240, text:"BALANCE!" },
-      { x:4930, text:"SPIN!" },
-      { x:5400, text:"RACE THE CANDYFLOSS!" },
-    ],
-    swirls:[],
-    trees:[
-      { x:300 }, { x:700 }, { x:1120 }, { x:1700 }, { x:2220 },
-      { x:2960 }, { x:4560 }, { x:5250 }, { x:5900 }, { x:6550 },
-    ],
-  },
+const START_LINE = 5450;
+const FINISH_LINE = 6800;
+const WORLD_END = 7200;
+
+const SOLIDS = [
+  // ground, split either side of the poison river
+  { x:-200, y:GROUND_Y, w:3400, h:300, type:"ground" },
+  { x:3290, y:GROUND_Y, w:4700, h:300, type:"ground" },
+  // river bed — the octopus walks along this and climbs out the far side
+  { x:3200, y:530, w:90, h:60, type:"ground" },
+  // jump over!
+  { x:850, y:360, w:46, h:110, type:"wall" },
+  // spider-web trampoline, then the volcano to clear
+  { x:3620, y:450, w:90, h:20, type:"web" },
+  { x:3760, y:290, w:130, h:180, type:"volcano" },
+  // floating leaves you hop over
+  { x:4250, y:415, w:80, h:55, type:"leaf" },
+  { x:4560, y:415, w:80, h:55, type:"leaf" },
+  { x:4990, y:415, w:80, h:55, type:"leaf" },
 ];
 
-// the currently loaded level (assigned into plain vars the engine reads)
-let currentLevel, levelIndex = 0;
-let SOLIDS, SLOPES, HAZARDS, CHECKPOINTS, SIGNS, SWIRLS, THEME, ROSTER, RACER;
-let START_LINE, FINISH_LINE, WORLD_END;
-const COW_RACER = { kind:"cow", name:"cow", emoji:"🐮" };
+const HAZARDS = [
+  // quicksand pits
+  { x:2300, y:452, w:90,  h:24, kind:"quicksand" },
+  { x:2600, y:452, w:100, h:24, kind:"quicksand" },
+  { x:2850, y:452, w:90,  h:24, kind:"quicksand" },
+  // poison river — jump it, unless you are the octopus
+  { x:3200, y:470, w:90, h:70, kind:"poison" },
+  // low leaves — hold DUCK or you bang your head
+  { x:4420, y:380, w:100, h:56, kind:"lowleaf" },
+  { x:4840, y:380, w:100, h:56, kind:"lowleaf" },
+  { x:5120, y:380, w:100, h:56, kind:"lowleaf" },
+];
 
-function loadLevel(i){
-  levelIndex = i;
-  const L = currentLevel = LEVELS[i];
-  SOLIDS = L.solids; SLOPES = L.slopes; HAZARDS = L.hazards;
-  CHECKPOINTS = L.checkpoints; SIGNS = L.signs; SWIRLS = L.swirls;
-  THEME = L.theme; ROSTER = L.animals || ANIMALS;
-  RACER = L.racer || COW_RACER;
-  START_LINE = L.startLine; FINISH_LINE = L.finishLine; WORLD_END = L.worldEnd;
-  pickIndex = 0;
-}
+// shallow jungle pools: harmless to everyone, but the fish refills its air
+// and swims fast through them. Spaced so a fish is never 10s from water.
+const WATERS = [
+  { x:60,   w:500 },  // the water path you start in
+  { x:1000, w:120 },
+  { x:1600, w:110 },  // a breather in the middle of the rolling logs
+  { x:2050, w:110 },
+  { x:2420, w:110 },  // between the quicksand pits
+  { x:3020, w:160 },  // launch pool — build up speed for the poison river
+  { x:3480, w:130 },  // launch pool — build up speed for the trampoline
+  { x:3950, w:120 },
+  { x:4640, w:120 },  // a breather in the middle of the leaves
+  { x:5250, w:120 },
+  { x:5700, w:110 },  // three pools along the race straight
+  { x:6150, w:110 },
+  { x:6550, w:110 },
+];
+const WATER_H = 30;
+
+// rolling logs: spawn on the right of the zone and roll left, 1 second apart
+const LOG_ZONE = { x0:1140, x1:2000, speed:2.6, interval:60, w:74, h:46 };
+
+// checkpoints: {trigger x, respawn x}
+const CHECKPOINTS = [
+  { tx:800,  rx:800 },
+  { tx:1160, rx:1160 },
+  { tx:2200, rx:2200 },
+  { tx:3120, rx:3120 },
+  { tx:3560, rx:3560 },
+  { tx:4150, rx:4150 },
+  { tx:5380, rx:5380 },
+];
+
+const SIGNS = [
+  { x:220,  text:"DOWN IN THE JUNGLE →" },
+  { x:770,  text:"JUMP OVER!" },
+  { x:1180, text:"ROLLING LOGS!" },
+  { x:2230, text:"QUICKSAND — JUMP IT!" },
+  { x:3120, text:"POISON RIVER!" },
+  { x:3560, text:"BOUNCE OVER THE VOLCANO!" },
+  { x:4160, text:"JUMP OVER, DUCK UNDER!" },
+  { x:5420, text:"RACE THE GECKO!" },
+];
+
+// decorative jungle trees
+const TREES = [
+  { x:120 }, { x:430 }, { x:960 }, { x:1420 }, { x:1900 }, { x:2180 },
+  { x:2500 }, { x:2980 }, { x:3420 }, { x:4080 }, { x:4400 }, { x:5000 },
+  { x:5320 }, { x:5850 }, { x:6300 }, { x:6700 }, { x:7000 },
+];
 
 // ------------------------------------------------------------------
-// Input
+// Input — keyboard
 // ------------------------------------------------------------------
 const keys = {};
 let jumpBuffer = 0;
-let confirmEdge = false, leftEdge = false, rightEdge = false, pauseEdge = false, muteEdge = false, resetEdge = false;
+let confirmEdge = false, leftEdge = false, rightEdge = false;
+let pauseEdge = false, muteEdge = false, resetEdge = false, scoresEdge = false;
 let toast = "", toastT = 0;
 function setToast(t){ toast = t; toastT = 140; }
 
 const JUMP_KEYS = ["Space","ArrowUp","KeyW"];
 const LEFT_KEYS = ["ArrowLeft","KeyA"];
 const RIGHT_KEYS = ["ArrowRight","KeyD"];
+const DUCK_KEYS = ["ArrowDown","KeyS"];
 
 addEventListener("keydown", (e) => {
   if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
@@ -366,7 +195,10 @@ addEventListener("keydown", (e) => {
     if (e.code === "KeyP" || e.code === "Escape") pauseEdge = true;
     if (e.code === "KeyM") muteEdge = true;
     if (e.code === "KeyR") resetEdge = true;
+    if (e.code === "KeyH") scoresEdge = true;
   }
+  if (JUMP_KEYS.includes(e.code) || LEFT_KEYS.includes(e.code) ||
+      RIGHT_KEYS.includes(e.code) || DUCK_KEYS.includes(e.code)) touchMode = false;
   keys[e.code] = true;
   ensureAudio();
 }, { passive:false });
@@ -374,9 +206,107 @@ addEventListener("keydown", (e) => {
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
 function held(list){ return list.some(k => keys[k]); }
-const jumpHeld = () => held(JUMP_KEYS);
-const leftHeld = () => held(LEFT_KEYS);
-const rightHeld = () => held(RIGHT_KEYS);
+
+// ------------------------------------------------------------------
+// Input — touch (tablet). Left drag-stick, two buttons on the right.
+// ------------------------------------------------------------------
+const STICK = { cx:140, cy:458, w:230, h:86, knobR:36, range:74 };
+const BTN_JUMP = { cx:856, cy:388, r:52 };
+const BTN_DUCK = { cx:856, cy:482, r:40 };
+const BTN_PAUSE = { cx:928, cy:32, r:22 };
+
+// The on-screen controls are shown by default (this is a tablet-first game).
+// They hide only while someone is actively using the keyboard, and come
+// straight back on the next tap or click.
+let touchMode = true;
+const touch = {
+  stickId:null, knob:0, dir:0,
+  jumpId:null, jumpDown:false,
+  duckId:null, duckDown:false,
+};
+let uiButtons = [];   // rebuilt every render: { id, x, y, w, h }
+let uiTap = null;     // id of the button tapped since the last update
+
+function uiButton(id, x, y, w, h){ uiButtons.push({ id, x, y, w, h }); }
+function hitUI(p){
+  for (let i = uiButtons.length - 1; i >= 0; i--){
+    const b = uiButtons[i];
+    if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) return b.id;
+  }
+  return null;
+}
+function inCircle(p, c){
+  const dx = p.x - c.cx, dy = p.y - c.cy;
+  return dx*dx + dy*dy <= c.r*c.r * 1.35; // a little forgiving for small fingers
+}
+function inStick(p){
+  return p.x >= STICK.cx - STICK.w/2 - 30 && p.x <= STICK.cx + STICK.w/2 + 30 &&
+         p.y >= STICK.cy - STICK.h/2 - 30 && p.y <= STICK.cy + STICK.h/2 + 30;
+}
+function canvasPos(e){
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+}
+function playing(){ return state === "playing" || state === "countdown" || state === "race"; }
+
+function onDown(e){
+  ensureAudio();
+  touchMode = true;
+  const p = canvasPos(e);
+
+  if (playing() || state === "paused"){
+    if (inCircle(p, BTN_PAUSE)){ pauseEdge = true; return; }
+  }
+  if (playing()){
+    if (inCircle(p, BTN_JUMP)){
+      touch.jumpId = e.pointerId; touch.jumpDown = true; jumpBuffer = BUFFER; return;
+    }
+    if (inCircle(p, BTN_DUCK)){
+      touch.duckId = e.pointerId; touch.duckDown = true; return;
+    }
+    if (inStick(p) || p.x < W/2){
+      touch.stickId = e.pointerId;
+      touch.knob = Math.max(-STICK.range, Math.min(STICK.range, p.x - STICK.cx));
+      return;
+    }
+    return;
+  }
+
+  // menus: buttons drawn by the last render
+  const id = hitUI(p);
+  if (id) uiTap = id;
+  else if (state === "paused") pauseEdge = true;
+}
+
+function onMove(e){
+  if (e.pointerId !== touch.stickId) return;
+  const p = canvasPos(e);
+  touch.knob = Math.max(-STICK.range, Math.min(STICK.range, p.x - STICK.cx));
+}
+
+function onUp(e){
+  if (e.pointerId === touch.stickId){ touch.stickId = null; touch.knob = 0; }
+  if (e.pointerId === touch.jumpId){ touch.jumpId = null; touch.jumpDown = false; }
+  if (e.pointerId === touch.duckId){ touch.duckId = null; touch.duckDown = false; }
+}
+
+canvas.addEventListener("pointerdown", (e) => { e.preventDefault(); onDown(e); });
+canvas.addEventListener("pointermove", (e) => { e.preventDefault(); onMove(e); });
+canvas.addEventListener("pointerup", (e) => { e.preventDefault(); onUp(e); });
+canvas.addEventListener("pointercancel", (e) => { onUp(e); });
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// the stick only counts as a direction past a small deadzone
+function stickDir(){
+  if (touch.stickId === null) return 0;
+  if (touch.knob > 12) return 1;
+  if (touch.knob < -12) return -1;
+  return 0;
+}
+const jumpHeld  = () => held(JUMP_KEYS) || touch.jumpDown;
+const leftHeld  = () => held(LEFT_KEYS) || stickDir() === -1;
+const rightHeld = () => held(RIGHT_KEYS) || stickDir() === 1;
+const duckHeld  = () => held(DUCK_KEYS) || touch.duckDown;
 
 // ------------------------------------------------------------------
 // Audio (generated, no asset files)
@@ -401,28 +331,29 @@ function beep(freq, dur=0.12, type="square", vol=0.15){
 }
 const sfx = {
   jump:    () => beep(620, 0.12, "square", 0.12),
+  pounce:  () => { beep(520,0.1,"square",0.13); setTimeout(()=>beep(880,0.14,"square",0.12),70); },
   land:    () => beep(220, 0.06, "sine", 0.08),
   bump:    () => beep(130, 0.18, "sawtooth", 0.14),
   splash:  () => { beep(300,0.12,"sine",0.12); setTimeout(()=>beep(200,0.14,"sine",0.1),60); },
+  sink:    () => { [330,262,196,147].forEach((f,i)=>setTimeout(()=>beep(f,0.18,"sawtooth",0.13), i*90)); },
+  gasp:    () => beep(1100, 0.06, "sine", 0.09),
   check:   () => { beep(660,0.08,"triangle",0.14); setTimeout(()=>beep(990,0.1,"triangle",0.14),80); },
   count:   () => beep(440, 0.12, "square", 0.14),
   go:      () => beep(880, 0.25, "square", 0.18),
-  spin:    () => { beep(500,0.08,"square",0.1); setTimeout(()=>beep(750,0.08,"square",0.1),60); setTimeout(()=>beep(1000,0.12,"square",0.12),120); },
   win:     () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.18,"square",0.16),i*130)); },
   lose:    () => { [392,330,262].forEach((f,i)=>setTimeout(()=>beep(f,0.2,"sawtooth",0.14),i*160)); },
   record:  () => { [784,988,1175,1568].forEach((f,i)=>setTimeout(()=>beep(f,0.16,"triangle",0.16), i*90)); },
   dash:    () => { beep(960,0.07,"sine",0.12); setTimeout(()=>beep(520,0.13,"sine",0.10),45); },
-  fly:     () => { [660,880,1100,1320].forEach((f,i)=>setTimeout(()=>beep(f,0.1,"triangle",0.12), i*70)); },
   boing:   () => { beep(300,0.08,"sine",0.12); setTimeout(()=>beep(720,0.12,"sine",0.11),55); },
   select:  () => beep(700, 0.08, "triangle", 0.12),
 };
 
-// background music (generated): calm during play, exciting during the race
+// background music: calm jungle during play, fast during the race
 const Music = {
   timer:null, track:null, step:0,
-  tempo:{ calm:300, fast:165 }, // ms per step
+  tempo:{ calm:300, fast:165 },
   mel:{
-    calm:[392,null,523,null,659,null,523,null,440,null,392,null,330,null,392,null],
+    calm:[392,null,466,null,523,null,466,null,392,null,349,null,311,null,349,null],
     fast:[523,659,784,659,523,659,784,880,784,659,523,440,523,659,784,880],
   },
   bass:{
@@ -461,34 +392,35 @@ const Music = {
   },
 };
 
-// top-10 fastest completion times per level, persisted in localStorage (falls back to memory)
+// ------------------------------------------------------------------
+// High scores — top 10 fastest runs, kept in localStorage
+// ------------------------------------------------------------------
 const Leaderboard = {
-  _mem: {},
-  get KEY(){ return currentLevel.scoreKey; },
+  KEY: SCORE_KEY, _mem: [],
   load(){
     try { return JSON.parse(localStorage.getItem(this.KEY)) || []; }
-    catch(e){ return this._mem[this.KEY] || []; }
+    catch(e){ return this._mem; }
   },
   save(list){
-    this._mem[this.KEY] = list;
+    this._mem = list;
     try { localStorage.setItem(this.KEY, JSON.stringify(list)); } catch(e){}
   },
-  add(timeMs, animal){
+  add(timeMs, ch){
     const list = this.load();
-    const entry = { t: Math.round(timeMs), a: animal.emoji, n: animal.name };
+    const entry = { t: Math.round(timeMs), a: ch.emoji, n: ch.name };
     list.push(entry);
     list.sort((x, y) => x.t - y.t);
     const rank = list.indexOf(entry);
     this.save(list.slice(0, 10));
     return rank < 10 ? rank : -1;
   },
-  reset(){ this._mem[this.KEY] = []; try { localStorage.removeItem(this.KEY); } catch(e){} },
+  reset(){ this._mem = []; try { localStorage.removeItem(this.KEY); } catch(e){} },
 };
 
 // ------------------------------------------------------------------
 // Game state
 // ------------------------------------------------------------------
-let state = "title"; // title | levels | pick | playing | countdown | race | win | lose | paused
+let state = "title"; // title | pick | scores | playing | countdown | race | win | lose | paused
 let prevState = "playing";
 let pickIndex = 0;
 let cameraX = 0;
@@ -496,8 +428,9 @@ let tGlobal = 0;
 let runMs = 0;       // elapsed time for the current run
 let lastTime = 0;    // finishing time of the last completed run
 let lastRank = -1;   // leaderboard index of the last run (-1 = not top 10)
-let inkParts = [];   // octopus ink / unicorn sparkle particle cloud
-loadLevel(0);
+let inkParts = [];   // octopus ink cloud + water splashes
+let logs = [];       // rolling logs
+let logSpawn = 0;
 
 const player = {
   x: 80, y: GROUND_Y - PH, w: PW, h: PH,
@@ -505,36 +438,35 @@ const player = {
   grounded: false, coyote: 0,
   blockedLeft: false, blockedRight: false,
   standing: null, justJumped: false,
-  animal: ANIMALS[0],
+  ch: CHARS[0],
   respawnX: 80,
-  onBeam: false, balanceTimer: 0, balanceFell: false,
-  launched: false, spinTimer: 0,
-  distracted: false, distractTimer: 0, distractCooldown: 200,
+  launched: false,
   hurtFlash: 0, runBob: 0,
   reachedCheck: -1,
+  ducking: false, noJumpCut: 0, hitCool: 0,
   dashTimer: 0, dashCooldown: 0, dashDir: 1, wasClimbing: false,
-  noJumpCut: 0, flyLeft: 0, flyTimer: 0,
+  air: 600, inWater: false,
 };
 
-const cow = { x: 0, y: GROUND_Y - 50, w: 56, h: 50, anim:0 };
+const gecko = { x: 0, y: GROUND_Y - 44, w: 58, h: 44, anim: 0 };
 
 let countdownTimer = 0, countdownStep = 0, raceStarted = false;
 
-function resetPlayer(animal){
-  player.animal = animal;
+function resetPlayer(ch){
+  player.ch = ch;
   player.x = 80; player.y = GROUND_Y - PH;
+  player.w = PW; player.h = PH;
   player.vx = 0; player.vy = 0; player.facing = 1;
   player.grounded = false; player.coyote = 0;
   player.standing = null; player.respawnX = 80;
-  player.onBeam = false; player.balanceTimer = 0; player.balanceFell = false;
-  player.launched = false; player.spinTimer = 0;
-  player.distracted = false; player.distractTimer = 0; player.distractCooldown = 200;
+  player.launched = false;
   player.hurtFlash = 0; player.reachedCheck = -1;
+  player.ducking = false; player.noJumpCut = 0; player.hitCool = 0;
   player.dashTimer = 0; player.dashCooldown = 0; player.dashDir = 1; player.wasClimbing = false;
-  player.noJumpCut = 0; player.flyTimer = 0;
-  player.flyLeft = animal.flyOnce ? (animal.flyCharges || 1) : 0;
+  player.air = ch.airSpan || 0; player.inWater = false;
   inkParts.length = 0;
-  cow.x = START_LINE - 90; cow.y = GROUND_Y - cow.h;
+  logs.length = 0; logSpawn = 0;
+  gecko.x = START_LINE - 90; gecko.y = GROUND_Y - gecko.h;
   raceStarted = false;
   runMs = 0; lastRank = -1;
 }
@@ -542,10 +474,11 @@ function resetPlayer(animal){
 function respawn(){
   player.x = player.respawnX;
   player.y = GROUND_Y - PH;
+  player.h = PH; player.ducking = false;
   player.vx = 0; player.vy = 0;
-  player.balanceFell = false; player.balanceTimer = 0;
   player.launched = false;
   player.hurtFlash = 18;
+  if (player.ch.airSpan) player.air = player.ch.airSpan;
 }
 
 // ------------------------------------------------------------------
@@ -555,37 +488,12 @@ function overlaps(a, s){
   return a.x < s.x + s.w && a.x + a.w > s.x && a.y < s.y + s.h && a.y + a.h > s.y;
 }
 
-// height of the walkable ground at a given world x (slope ramps, else flat ground)
-function groundSurfaceY(x){
-  for (const sl of SLOPES){
-    if (x >= sl.x0 && x <= sl.x1){
-      const t = (x - sl.x0) / (sl.x1 - sl.x0);
-      return sl.y0 + t * (sl.y1 - sl.y0);
-    }
-  }
-  return GROUND_Y;
-}
-
-// the slope the player is currently over (for the downhill speed boost)
-function slopeAt(x){
-  for (const sl of SLOPES){
-    if (x > sl.x0 && x < sl.x1) return sl;
-  }
-  return null;
-}
-
-function skipSolid(s){
-  // when balance lost, the player slips off the beam
-  return s.type === "beam" && player.balanceFell;
-}
-
 function collideX(){
   player.blockedLeft = player.blockedRight = false;
   player.x += player.vx;
   for (const s of SOLIDS){
-    if (skipSolid(s)) continue;
     if (overlaps(player, s)){
-      // step assist: walk straight up onto very low obstacles (bounce pads)
+      // step assist: walk straight up onto very low things (the trampoline)
       const rise = player.y + player.h - s.y;
       if (player.grounded && rise > 0 && rise <= 24){ player.y = s.y - player.h; continue; }
       if (player.vx > 0){ player.x = s.x - player.w; player.blockedRight = true; }
@@ -602,7 +510,6 @@ function collideY(){
   player.grounded = false; player.standing = null;
   player.y += player.vy;
   for (const s of SOLIDS){
-    if (skipSolid(s)) continue;
     if (overlaps(player, s)){
       if (player.vy > 0){ player.y = s.y - player.h; player.grounded = true; player.standing = s; }
       else if (player.vy < 0){ player.y = s.y + s.h; }
@@ -612,33 +519,56 @@ function collideY(){
   if (player.grounded && !wasGrounded && player.vy === 0) sfx.land();
 }
 
+// which pool (if any) the player is standing in
+function waterAt(){
+  const foot = player.y + player.h;
+  const cx = player.x + player.w/2;
+  for (const wt of WATERS){
+    if (cx >= wt.x && cx <= wt.x + wt.w && foot > GROUND_Y - WATER_H && foot <= GROUND_Y + 6) return wt;
+  }
+  return null;
+}
+
 // ------------------------------------------------------------------
 // Player update
 // ------------------------------------------------------------------
 function updatePlayer(allowInput){
-  const a = player.animal;
+  const a = player.ch;
 
-  // --- distraction (dog) ---
-  if (a.distract && state !== "countdown"){
-    if (player.distracted){
-      player.distractTimer--;
-      if (player.distractTimer <= 0) player.distracted = false;
-    } else if (player.grounded && !player.onBeam){
-      player.distractCooldown--;
-      if (player.distractCooldown <= 0){
-        player.distracted = true;
-        player.distractTimer = 38;
-        player.distractCooldown = 150 + (Math.random()*120|0);
+  // --- water ---
+  const pool = waterAt();
+  player.inWater = !!pool;
+
+  // --- air span (fish) ---
+  if (a.airSpan){
+    if (player.inWater){
+      if (player.air < a.airSpan * 0.5) splash(player.x + player.w/2, GROUND_Y - 18, 3);
+      player.air = a.airSpan;
+    } else {
+      player.air--;
+      if (player.air > 0 && player.air < 180 && player.air % 45 === 0) sfx.gasp();
+      if (player.air <= 0){
+        sfx.sink();
+        respawn();
+        return;
       }
     }
   }
 
-  // --- octopus ink-jet dash (the jump key, which the octopus can't use to jump) ---
+  // --- duck (hold it down) ---
+  const wantDuck = allowInput && duckHeld() && player.grounded && player.dashTimer <= 0;
+  const targetH = wantDuck ? PH_DUCK : PH;
+  if (player.h !== targetH){
+    player.y += player.h - targetH;   // keep the feet planted
+    player.h = targetH;
+  }
+  player.ducking = wantDuck;
+
+  // --- octopus ink-jet dash (the jump button, which the octopus can't use to jump) ---
   if (a.dash){
     if (player.dashCooldown > 0) player.dashCooldown--;
     if (player.dashTimer  > 0) player.dashTimer--;
-    if (allowInput && !player.distracted && jumpBuffer > 0 &&
-        player.dashTimer <= 0 && player.dashCooldown <= 0){
+    if (allowInput && jumpBuffer > 0 && player.dashTimer <= 0 && player.dashCooldown <= 0){
       player.dashTimer = DASH_TIME;
       player.dashCooldown = DASH_COOLDOWN;
       player.dashDir = player.facing;
@@ -649,16 +579,17 @@ function updatePlayer(allowInput){
 
   // --- horizontal input ---
   let dir = 0;
-  if (allowInput && !player.distracted){
+  if (allowInput){
     if (leftHeld()) dir -= 1;
     if (rightHeld()) dir += 1;
   }
   let maxSpeed = a.run;
-  if (slopeAt(player.x)) maxSpeed *= (a.slip ? 2.5 : 1.6); // downhill boost; slimy octopus slides fastest
+  if (a.swim && player.inWater) maxSpeed = a.swimRun;   // the fish flies through water
+  if (player.ducking) maxSpeed *= DUCK_SPEED;
   const accel = a.accel;
   if (dir !== 0){
     if (Math.abs(player.vx) > maxSpeed){
-      // boosted above top speed (dash / slingshot / leaving the downhill) — ease back, don't add more
+      // boosted above top speed (dash / slingshot / leaving a pool) — ease back
       player.vx += (player.vx > 0 ? -0.3 : 0.3);
     } else {
       player.vx += dir * accel;
@@ -689,10 +620,8 @@ function updatePlayer(allowInput){
 
   // --- octopus climb-over ---
   let climbing = false;
-  if (a.climb && allowInput && !player.distracted){
-    if ((rightHeld() && player.blockedRight) || (leftHeld() && player.blockedLeft)){
-      climbing = true;
-    }
+  if (a.climb && allowInput){
+    if ((rightHeld() && player.blockedRight) || (leftHeld() && player.blockedLeft)) climbing = true;
   }
 
   // --- climb slingshot: launch forward when the octopus crawls over the top ---
@@ -705,54 +634,36 @@ function updatePlayer(allowInput){
     player.wasClimbing = climbing;
   }
 
-  // --- jump ---
+  // --- jump / pounce ---
   player.coyote = player.grounded ? COYOTE : Math.max(0, player.coyote - 1);
   player.justJumped = false;
-  if (allowInput && !player.distracted && !climbing && a.jump > 0 &&
+  if (allowInput && !climbing && !player.ducking && a.jump > 0 &&
       jumpBuffer > 0 && player.coyote > 0){
     let jv = a.jump;
-    if (a.runup) jv = a.jump + (Math.abs(player.vx) / a.run) * 4.2; // dog needs a run-up
+    if (a.pounce){
+      // the faster the tiger is running, the bigger the pounce
+      jv = a.jump + (Math.abs(player.vx) / a.run) * 5.5;
+      player.noJumpCut = 60;
+    }
     player.vy = -jv;
     player.grounded = false; player.coyote = 0; jumpBuffer = 0;
     player.justJumped = true;
-    sfx.jump();
+    if (a.pounce && Math.abs(player.vx) > a.run * 0.6) sfx.pounce(); else sfx.jump();
   }
-
-  // --- flight (unicorn/fairy): press JUMP in mid-air, limited charges per run ---
-  // locked for the first 0.5s of play so a stray press at the start can't waste it
-  if (a.flyOnce){
-    if (allowInput && !player.distracted && jumpBuffer > 0 &&
-        !player.grounded && player.coyote <= 0 &&
-        player.flyLeft > 0 && player.flyTimer <= 0 && runMs > 500){
-      player.flyLeft--;
-      player.flyTimer = a.flyTime || FLY_TIME;
-      jumpBuffer = 0;
-      sfx.fly();
-    }
-    if (player.flyTimer > 0){
-      if (player.grounded) player.flyTimer = 0; // landing ends the flight
-      else if (tGlobal % 3 === 0){
-        inkParts.push({
-          x: player.x + player.w/2 - player.facing * player.w * 0.4,
-          y: player.y + player.h * 0.7,
-          vx: -player.facing * (0.5 + Math.random()), vy: 0.4 + Math.random()*0.6,
-          life: 0, max: 18 + Math.random()*10, r: 3 + Math.random()*3,
-          c: a.sparkle || "255,215,120",
-        });
-      }
-    }
+  // the fish flicks its tail to swim upward while it is in a pool
+  if (allowInput && a.swim && player.inWater && jumpBuffer > 0 && !player.ducking){
+    player.vy = -a.jump; jumpBuffer = 0; player.justJumped = true;
+    splash(player.x + player.w/2, GROUND_Y - 20, 5);
+    sfx.jump();
   }
 
   // --- vertical motion ---
   if (climbing){
     player.vy = -CLIMB_SPEED;
-  } else if (player.flyTimer > 0){
-    // flying: hold JUMP to soar up, release to drift gently down
-    player.flyTimer--;
-    player.vy = jumpHeld() ? (a.flyRise || -2.8) : 1.4;
   } else {
     let g = GRAVITY * a.grav;
-    if (player.vy < 0 && jumpHeld() && !a.runup) g *= 0.5; // variable jump height
+    if (a.swim && player.inWater) g *= 0.4;                       // floaty in water
+    if (player.vy < 0 && jumpHeld() && !a.pounce) g *= 0.5;       // variable jump height
     player.vy += g;
     if (player.noJumpCut > 0) player.noJumpCut--;
     else if (!jumpHeld() && player.vy < -4 && !player.justJumped) player.vy = -4; // jump cut
@@ -761,64 +672,45 @@ function updatePlayer(allowInput){
 
   collideY();
 
-  // --- downhill slopes: ride the ramp surface ---
-  // gate on the LEFT edge so the snap only starts once the player has fully
-  // cleared the last step (whose right edge is the slope's top); otherwise the
-  // snap would pull the player down into the side of the step and eject them.
-  const cxp = player.x + player.w/2;
-  for (const sl of SLOPES){
-    if (player.x >= sl.x0 && cxp <= sl.x1 && player.vy >= 0){
-      const surf = groundSurfaceY(cxp);
-      if (player.y + player.h >= surf - 4){
-        player.y = surf - player.h;
+  // --- rolling logs: ride along the top, get bumped if one catches your side ---
+  if (player.hitCool > 0) player.hitCool--;
+  if (!a.tough){
+    for (const l of logs){
+      const box = { x:l.x, y:l.y, w:LOG_ZONE.w, h:LOG_ZONE.h };
+      if (!overlaps(player, box)) continue;
+      const prevBottom = player.y + player.h - Math.max(0, player.vy);
+      if (player.vy >= 0 && prevBottom <= l.y + 10){
+        player.y = l.y - player.h;
         player.vy = 0;
         player.grounded = true;
-        player.standing = { type:"slope" };
+        player.standing = { type:"log" };
+        player.x -= LOG_ZONE.speed;   // the log carries you back as it rolls
+      } else if (player.hitCool <= 0){
+        sfx.bump();
+        player.vx = -4; player.vy = -5;
+        player.grounded = false;
+        player.hurtFlash = 40; player.hitCool = 45;
       }
     }
   }
 
-  // --- balance beam: keep moving or fall ---
-  player.onBeam = player.grounded && player.standing && player.standing.type === "beam";
-  if (player.onBeam){
-    if (Math.abs(player.vx) < 0.5) player.balanceTimer++;
-    else player.balanceTimer = 0;
-    if (player.balanceTimer > 26){ player.balanceFell = true; sfx.bump(); }
-  } else if (player.grounded){
-    player.balanceTimer = 0; player.balanceFell = false;
-  }
-
-  // --- bounce pad ---
-  if (player.grounded && player.standing && player.standing.type === "bounce"){
+  // --- spider-web trampoline ---
+  if (player.grounded && player.standing && player.standing.type === "web"){
     player.vy = -BOUNCE_VY;
     player.grounded = false; player.coyote = 0;
-    player.noJumpCut = 60; // a pad bounce is always full height
+    player.noJumpCut = 60;   // a trampoline bounce is always full height
     sfx.boing();
   }
 
-  // --- spinner launch ---
-  if (player.grounded && player.standing && player.standing.type === "spinner"){
-    if (!player.launched){
-      player.vy = -15;
-      player.vx = a.run * 1.15;
-      player.facing = 1;
-      player.launched = true;
-      player.spinTimer = 26;
-      sfx.spin();
-    }
-  } else if (player.grounded){
-    player.launched = false;
-  }
-  if (player.spinTimer > 0) player.spinTimer--;
-
-  // --- hazards ---
-  for (const hz of HAZARDS){
-    if (hz.kind === "spike" && a.spikeImmune) continue; // octopus oozes over spikes
-    if (hz.kind === "water" && a.swim) continue;        // octopus swims through water
-    if (overlaps(player, hz)){
-      if (hz.kind === "spike") sfx.bump(); else sfx.splash();
-      respawn();
-      break;
+  // --- hazards (the octopus oozes through all of them) ---
+  if (!a.tough){
+    for (const hz of HAZARDS){
+      if (hz.kind === "lowleaf" && player.ducking) continue;  // ducked = you slip underneath
+      if (overlaps(player, hz)){
+        if (hz.kind === "poison") sfx.splash(); else sfx.bump();
+        respawn();
+        return;
+      }
     }
   }
 
@@ -826,6 +718,7 @@ function updatePlayer(allowInput){
   if (player.y > H + 60){
     sfx.splash();
     respawn();
+    return;
   }
 
   // --- checkpoints ---
@@ -844,17 +737,41 @@ function updatePlayer(allowInput){
   if (player.hurtFlash > 0) player.hurtFlash--;
 }
 
+function splash(x, y, n){
+  for (let i = 0; i < n; i++){
+    inkParts.push({
+      x, y, vx:(Math.random()-0.5)*2.4, vy:-1 - Math.random()*2,
+      life:0, max:16 + Math.random()*10, r:2 + Math.random()*3, c:"120,200,255",
+    });
+  }
+}
+
+// ------------------------------------------------------------------
+// Rolling logs
+// ------------------------------------------------------------------
+function updateLogs(){
+  logSpawn--;
+  if (logSpawn <= 0){
+    logs.push({ x: LOG_ZONE.x1, y: GROUND_Y - LOG_ZONE.h });
+    logSpawn = LOG_ZONE.interval;
+  }
+  for (const l of logs) l.x -= LOG_ZONE.speed;
+  if (logs.length) logs = logs.filter(l => l.x + LOG_ZONE.w > LOG_ZONE.x0);
+}
+
 // ------------------------------------------------------------------
 // Update dispatch
 // ------------------------------------------------------------------
 function update(){
   tGlobal++;
-  cow.anim += 0.2;
-  if (state === "playing" || state === "race") runMs += 1000/60; // run clock
+  gecko.anim += 0.25;
+  if (state === "playing" || state === "race") runMs += 1000/60;
 
-  // ink particles drift and fade
-  for (const p of inkParts){ p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life++; }
+  // particles drift and fade
+  for (const p of inkParts){ p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life++; }
   if (inkParts.length) inkParts = inkParts.filter(p => p.life < p.max);
+
+  if (state === "playing" || state === "countdown" || state === "race") updateLogs();
 
   if (state === "playing"){
     updatePlayer(true);
@@ -862,8 +779,7 @@ function update(){
       raceStarted = true;
       state = "countdown";
       countdownTimer = 50; countdownStep = 3;
-      // cow lines up at exactly the same spot as the player — fair start
-      cow.x = player.x; cow.y = GROUND_Y - cow.h;
+      gecko.x = player.x; gecko.y = GROUND_Y - gecko.h;   // fair start, same spot
       sfx.count();
     }
   } else if (state === "countdown"){
@@ -873,37 +789,37 @@ function update(){
       countdownStep--;
       if (countdownStep > 0){ countdownTimer = 50; sfx.count(); }
       else if (countdownStep === 0){ countdownTimer = 40; sfx.go(); }
-      else { state = "race"; cow.x = player.x; } // exact same start on GO
+      else { state = "race"; gecko.x = player.x; }
     }
   } else if (state === "race"){
     updatePlayer(true);
-    let cs;
-    if (player.animal.dash){
-      // octopus: cow is faster than your walk — you MUST ink-dash to win
-      cs = 1.1 * player.animal.run;
+    let gs;
+    if (player.ch.dash){
+      // octopus: the gecko is faster than your walk — you MUST ink-dash to win
+      gs = 1.1 * player.ch.run;
     } else {
-      // others: cow runs at 0.9x the animal's speed, then sprints to 1.1x near the line
-      const base = 0.9 * player.animal.run;
-      const top  = 1.1 * player.animal.run;
-      const distLeft = FINISH_LINE - (cow.x + cow.w);
-      cs = base;
+      // others: the gecko runs at 0.9x your speed, then sprints to 1.1x near the line
+      const base = 0.9 * player.ch.run;
+      const top  = 1.1 * player.ch.run;
+      const distLeft = FINISH_LINE - (gecko.x + gecko.w);
+      gs = base;
       if (distLeft < 320){
         const t = Math.max(0, 1 - distLeft / 320);
-        cs = base + (top - base) * t;
+        gs = base + (top - base) * t;
       }
     }
-    cow.x += cs;
+    gecko.x += gs;
     if (player.x + player.w >= FINISH_LINE){
       state = "win"; sfx.win();
       lastTime = runMs;
-      lastRank = Leaderboard.add(runMs, player.animal);
+      lastRank = Leaderboard.add(runMs, player.ch);
       if (lastRank >= 0) setTimeout(() => sfx.record(), 400);
     }
-    else if (cow.x + cow.w >= FINISH_LINE){ state = "lose"; sfx.lose(); }
+    else if (gecko.x + gecko.w >= FINISH_LINE){ state = "lose"; sfx.lose(); }
   }
 
   // camera
-  if (state === "playing" || state === "countdown" || state === "race"){
+  if (playing()){
     let target = player.x + player.w/2 - W/2 + 60;
     cameraX += (target - cameraX) * 0.12;
     cameraX = Math.max(0, Math.min(WORLD_END - W, cameraX));
@@ -913,37 +829,45 @@ function update(){
 }
 
 // ------------------------------------------------------------------
-// Menu / state input handling (edges)
+// Menu / state input handling (edges + taps)
 // ------------------------------------------------------------------
 function handleEdges(){
   if (toastT > 0) toastT--;
   if (muteEdge){ muted = !muted; muteEdge = false; }
-  if (resetEdge){ Leaderboard.reset(); lastRank = -1; setToast("Leaderboard reset!"); sfx.check(); resetEdge = false; }
+  if (uiTap === "mute"){ muted = !muted; uiTap = null; }
+  if (resetEdge){ Leaderboard.reset(); lastRank = -1; setToast("High scores cleared!"); sfx.check(); resetEdge = false; }
+  if (uiTap === "reset"){ Leaderboard.reset(); lastRank = -1; setToast("High scores cleared!"); sfx.check(); uiTap = null; }
+
+  const confirm = confirmEdge || uiTap === "play" || uiTap === "go" || uiTap === "again";
+  const wantScores = scoresEdge || uiTap === "scores";
+  const back = uiTap === "back";
 
   if (state === "title"){
-    if (confirmEdge){ state = "levels"; sfx.select(); }
-  } else if (state === "levels"){
-    if (leftEdge){ levelIndex = (levelIndex - 1 + LEVELS.length) % LEVELS.length; sfx.select(); }
-    if (rightEdge){ levelIndex = (levelIndex + 1) % LEVELS.length; sfx.select(); }
-    if (confirmEdge){ loadLevel(levelIndex); state = "pick"; sfx.select(); }
+    if (confirm){ state = "pick"; sfx.select(); }
+    else if (wantScores){ prevState = "title"; state = "scores"; sfx.select(); }
+  } else if (state === "scores"){
+    if (confirm || back || wantScores){ state = prevState === "title" ? "title" : "pick"; sfx.select(); }
   } else if (state === "pick"){
-    if (leftEdge){ pickIndex = (pickIndex - 1 + ROSTER.length) % ROSTER.length; sfx.select(); }
-    if (rightEdge){ pickIndex = (pickIndex + 1) % ROSTER.length; sfx.select(); }
-    if (confirmEdge){ resetPlayer(ROSTER[pickIndex]); state = "playing"; sfx.go(); }
-  } else if (state === "playing" || state === "countdown" || state === "race"){
+    if (leftEdge || uiTap === "prev"){ pickIndex = (pickIndex - 1 + CHARS.length) % CHARS.length; sfx.select(); }
+    if (rightEdge || uiTap === "next"){ pickIndex = (pickIndex + 1) % CHARS.length; sfx.select(); }
+    if (uiTap && uiTap.startsWith("card")){ pickIndex = +uiTap.slice(4); sfx.select(); }
+    else if (confirm){ resetPlayer(CHARS[pickIndex]); state = "playing"; sfx.go(); }
+    else if (wantScores){ prevState = "pick"; state = "scores"; sfx.select(); }
+  } else if (playing()){
     if (pauseEdge){ prevState = state; state = "paused"; }
   } else if (state === "paused"){
-    if (pauseEdge){ state = prevState; }
+    if (pauseEdge || confirm || uiTap === "resume"){ state = prevState; }
   } else if (state === "win" || state === "lose"){
-    // return to the level picker so players can switch level or animal
-    if (confirmEdge || leftEdge || rightEdge){ state = "levels"; sfx.select(); }
+    if (wantScores){ prevState = "pick"; state = "scores"; sfx.select(); }
+    else if (confirm || leftEdge || rightEdge){ state = "pick"; sfx.select(); }
   }
 
-  confirmEdge = leftEdge = rightEdge = pauseEdge = false;
+  confirmEdge = leftEdge = rightEdge = pauseEdge = scoresEdge = false;
+  uiTap = null;
 }
 
 // ------------------------------------------------------------------
-// Rendering
+// Rendering helpers
 // ------------------------------------------------------------------
 function rr(x,y,w,h,r){
   ctx.beginPath();
@@ -954,225 +878,286 @@ function rr(x,y,w,h,r){
   ctx.arcTo(x,y,x+w,y,r);
   ctx.closePath();
 }
+function worldX(x){ return x - cameraX; }
+function centerText(text, y, size, color="#fff", weight="bold"){
+  ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `${weight} ${size}px 'Comic Sans MS', sans-serif`;
+  ctx.fillText(text, W/2, y);
+}
+function dim(alpha){ ctx.fillStyle = `rgba(6,26,10,${alpha})`; ctx.fillRect(0,0,W,H); }
+function formatTime(ms){
+  const s = ms/1000, m = Math.floor(s/60), sec = s - m*60;
+  return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(1);
+}
 
+// ------------------------------------------------------------------
+// World rendering
+// ------------------------------------------------------------------
 function drawBackground(){
-  // sky gradient
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,THEME.skyTop); g.addColorStop(1,THEME.skyBottom);
+  g.addColorStop(0,"#5fc3cf"); g.addColorStop(0.55,"#9fdcb0"); g.addColorStop(1,"#d6f0bd");
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  // rainbows arcing behind the hills
-  if (THEME.rainbows){
-    const bands = ["#ff5a5a","#ffa53f","#ffe14d","#5aff8a","#5aa8ff","#b98aff"];
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = 9;
-    for (let i=-1;i<3;i++){
-      const rx = i*760 - (cameraX*0.25 % 760) + 300;
-      for (let b=0;b<bands.length;b++){
-        ctx.strokeStyle = bands[b];
-        ctx.beginPath();
-        ctx.arc(rx, GROUND_Y+30, 170 - b*9, Math.PI, 0);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  // parallax hills
-  ctx.fillStyle = THEME.hillFar;
-  for (let i=-1;i<8;i++){
-    const hx = i*420 - (cameraX*0.3 % 420);
+  // far jungle canopy
+  ctx.fillStyle = "#4b8f47";
+  for (let i=-1;i<9;i++){
+    const hx = i*380 - (cameraX*0.25 % 380);
     ctx.beginPath();
-    ctx.arc(hx+160, GROUND_Y+40, 220, Math.PI, 0);
+    ctx.arc(hx+150, GROUND_Y+30, 210, Math.PI, 0);
     ctx.fill();
   }
-  ctx.fillStyle = THEME.hillNear;
-  for (let i=-1;i<10;i++){
-    const hx = i*300 - (cameraX*0.5 % 300);
+  ctx.fillStyle = "#3a7838";
+  for (let i=-1;i<11;i++){
+    const hx = i*280 - (cameraX*0.45 % 280);
     ctx.beginPath();
-    ctx.arc(hx+120, GROUND_Y+70, 160, Math.PI, 0);
+    ctx.arc(hx+110, GROUND_Y+65, 155, Math.PI, 0);
     ctx.fill();
   }
-  // clouds
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  for (let i=0;i<6;i++){
-    const cx = (i*340 - (cameraX*0.2 % 340) + 100);
-    const cy = 70 + (i%3)*40;
-    cloud(cx, cy);
-  }
-  // gentle snowfall on snowy levels
-  if (THEME.snow){
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    for (let i=0;i<44;i++){
-      const speed = 0.5 + (i%5)*0.22;
-      const fx = (((i*97 - cameraX*0.4 + tGlobal*((i%3)-1)*0.3) % W) + W) % W;
-      const fy = (i*53 + tGlobal*speed) % H;
-      ctx.beginPath();
-      ctx.arc(fx, fy, 1.6 + (i%3), 0, 7);
-      ctx.fill();
-    }
-  }
-}
-function cloud(x,y){
-  ctx.beginPath();
-  ctx.arc(x,y,22,0,7); ctx.arc(x+26,y+6,28,0,7); ctx.arc(x+56,y,20,0,7);
-  ctx.fill();
-}
 
-function worldX(x){ return x - cameraX; }
-
-function drawSlopes(){
-  for (const sl of SLOPES){
-    const ax = worldX(sl.x0), ay = sl.y0;
-    const bx = worldX(sl.x1), by = sl.y1;
-    if (bx < -40 || ax > W+40) continue;
-    // dirt body of the ramp
-    ctx.fillStyle = THEME.dirt;
+  // leafy canopy along the top of the screen, with hanging vines
+  ctx.fillStyle = "#2f6b31";
+  for (let i=-1;i<13;i++){
+    const cx = i*160 - (cameraX*0.15 % 160);
     ctx.beginPath();
-    ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-    ctx.lineTo(bx, H+50); ctx.lineTo(ax, H+50);
-    ctx.closePath(); ctx.fill();
-    // grass/snow surface along the top of the ramp
-    ctx.strokeStyle = THEME.top; ctx.lineWidth = 14; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-    // motion lines to show it's a fast downhill
-    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 3;
-    for (let i=1;i<7;i++){
-      const t = i/7, sx = ax+(bx-ax)*t, sy = ay+(by-ay)*t;
-      ctx.beginPath(); ctx.moveTo(sx-28, sy-13); ctx.lineTo(sx-6, sy-19); ctx.stroke();
-    }
-    ctx.lineCap = "butt";
+    ctx.arc(cx+60, 6, 62, 0, Math.PI);
+    ctx.fill();
   }
-}
-
-function drawSwirls(){
-  ctx.save();
-  ctx.strokeStyle = "rgba(40,80,160,0.45)";
-  ctx.lineWidth = 4;
-  for (const s of SWIRLS){
-    const cx = worldX(s.x), cy = s.y;
-    if (cx < -80 || cx > W+80) continue;
+  ctx.strokeStyle = "#397d3a"; ctx.lineWidth = 5; ctx.lineCap = "round";
+  for (let i=0;i<10;i++){
+    const vx = i*230 - (cameraX*0.15 % 230) + 40;
+    const len = 60 + (i%4)*46;
+    const sway = Math.sin(tGlobal*0.02 + i)*10;
     ctx.beginPath();
-    for (let t=0;t<6.3;t+=0.2){
-      const r = (t/6.3)*s.r;
-      const px = cx + Math.cos(t*1.6)*r, py = cy + Math.sin(t*1.6)*r;
-      if (t===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
-    }
+    ctx.moveTo(vx, 20);
+    ctx.quadraticCurveTo(vx + sway, 20 + len*0.6, vx + sway*1.6, 20 + len);
     ctx.stroke();
+    ctx.fillStyle = "#4f9b45";
+    ctx.beginPath();
+    ctx.ellipse(vx + sway*1.6, 22 + len, 7, 13, sway*0.02, 0, 7);
+    ctx.fill();
   }
-  ctx.restore();
+  ctx.lineCap = "butt";
 }
 
 function drawTrees(){
-  const trees = currentLevel.trees;
-  if (!trees) return;
-  for (let i=0;i<trees.length;i++){
-    const t = trees[i];
-    const x = worldX(t.x);
-    if (x < -80 || x > W+80) continue;
-    const baseY = groundSurfaceY(t.x);
-    // candy-cane striped trunk
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(x-6, baseY-64, 12, 64);
-    ctx.fillStyle = "#e0533b";
-    for (let s=0; s<64; s+=16) ctx.fillRect(x-6, baseY-64+s, 12, 8);
-    // fluffy candyfloss top (pink or blue, gently bobbing)
-    const bob = Math.sin(tGlobal*0.03 + i)*3;
-    const pink = i % 3 !== 1;
-    ctx.fillStyle = pink ? "#ffb3e0" : "#bfe0ff";
+  for (let i=0;i<TREES.length;i++){
+    const x = worldX(TREES[i].x);
+    if (x < -110 || x > W+110) continue;
+    const bend = Math.sin(tGlobal*0.02 + i)*4;
+    // trunk
+    ctx.strokeStyle = "#7b5230"; ctx.lineWidth = 14; ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(x-20, baseY-72+bob, 22, 0, 7);
-    ctx.arc(x+20, baseY-72+bob, 22, 0, 7);
-    ctx.arc(x, baseY-92+bob, 27, 0, 7);
-    ctx.arc(x, baseY-66+bob, 24, 0, 7);
-    ctx.fill();
-    ctx.fillStyle = pink ? "#ffcce9" : "#d9edff";
-    ctx.beginPath();
-    ctx.arc(x-10, baseY-84+bob, 12, 0, 7);
-    ctx.arc(x+14, baseY-78+bob, 10, 0, 7);
-    ctx.fill();
+    ctx.moveTo(x, GROUND_Y);
+    ctx.quadraticCurveTo(x + bend, GROUND_Y-70, x + bend*2, GROUND_Y-130);
+    ctx.stroke();
+    // palm fronds
+    const tx = x + bend*2, ty = GROUND_Y-130;
+    ctx.fillStyle = i % 3 === 1 ? "#3f8f3a" : "#4fa347";
+    for (let f=0; f<6; f++){
+      const ang = Math.PI + (f/5)*Math.PI;
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(ang + Math.sin(tGlobal*0.02 + f)*0.05);
+      ctx.beginPath();
+      ctx.ellipse(46, 0, 46, 15, 0, 0, 7);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#c8862f";
+    ctx.beginPath(); ctx.arc(tx, ty+6, 8, 0, 7); ctx.fill();
+    ctx.lineCap = "butt";
   }
 }
 
 function drawSolid(s){
   const x = worldX(s.x), y = s.y;
-  if (x + s.w < -40 || x > W+40) return;
+  if (x + s.w < -60 || x > W+60) return;
   if (s.type === "ground"){
-    ctx.fillStyle = THEME.dirt;
+    ctx.fillStyle = "#6b4a2a";
     ctx.fillRect(x, y, s.w, s.h);
-    ctx.fillStyle = THEME.top;
+    ctx.fillStyle = "#3f8f3a";
     ctx.fillRect(x, y, s.w, 14);
-    ctx.fillStyle = THEME.topDark;
+    ctx.fillStyle = "#2f7a2c";
     for (let gx = (Math.floor(cameraX/24)*24 - cameraX); gx < W; gx += 24){
       if (gx >= x && gx <= x + s.w) ctx.fillRect(gx, y+10, 3, 6);
     }
-  } else if (s.type === "bounce"){
-    // springy bounce pad
-    ctx.fillStyle = "#e0533b"; rr(x, y+8, s.w, s.h-8, 6); ctx.fill();
-    ctx.strokeStyle = "#a33523"; ctx.lineWidth = 2;
-    for (let i=8;i<s.w-6;i+=16){
-      ctx.beginPath(); ctx.moveTo(x+i, y+8); ctx.lineTo(x+i+8, y+s.h); ctx.stroke();
-    }
-    const squish = Math.sin(tGlobal*0.15)*2;
-    ctx.fillStyle = "#ffd24d"; rr(x-4, y+squish, s.w+8, 10, 5); ctx.fill();
-    ctx.strokeStyle = "#b07b00"; ctx.lineWidth = 2; rr(x-4, y+squish, s.w+8, 10, 5); ctx.stroke();
   } else if (s.type === "wall"){
-    ctx.fillStyle = "#e0533b"; rr(x,y,s.w,s.h,6); ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    for (let i=0;i<s.h;i+=22){ ctx.fillRect(x, y+i, s.w, 8); }
-    ctx.strokeStyle = "#a33523"; ctx.lineWidth = 3; rr(x,y,s.w,s.h,6); ctx.stroke();
-  } else if (s.type === "beam"){
-    ctx.fillStyle = THEME.beam; rr(x,y,s.w,s.h,6); ctx.fill();
-    ctx.strokeStyle = THEME.beamStroke; ctx.lineWidth = 3; rr(x,y,s.w,s.h,6); ctx.stroke();
-    ctx.strokeStyle = THEME.beamStroke; ctx.globalAlpha = 0.5;
-    for (let i=20;i<s.w;i+=40){ ctx.beginPath(); ctx.moveTo(x+i,y); ctx.lineTo(x+i,y+s.h); ctx.stroke(); }
-    ctx.globalAlpha = 1;
-  } else if (s.type === "spinner"){
-    // spinning disk
-    const cx = x + s.w/2, cy = y + s.h/2;
-    ctx.fillStyle = "#3f7bd6"; rr(x,y,s.w,s.h,8); ctx.fill();
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(tGlobal*0.25);
-    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 4;
-    for (let i=0;i<4;i++){
-      ctx.rotate(Math.PI/2);
-      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(s.w/2-8,0); ctx.stroke();
+    // bamboo hurdle
+    ctx.fillStyle = "#b6d24a"; rr(x,y,s.w,s.h,6); ctx.fill();
+    ctx.strokeStyle = "#7c9a24"; ctx.lineWidth = 3;
+    for (let i=16;i<s.h;i+=24){ ctx.beginPath(); ctx.moveTo(x,y+i); ctx.lineTo(x+s.w,y+i); ctx.stroke(); }
+    rr(x,y,s.w,s.h,6); ctx.stroke();
+  } else if (s.type === "web"){
+    // spider-web trampoline
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5;
+    const cx = x + s.w/2, cy = y + s.h/2, squish = Math.sin(tGlobal*0.15)*2;
+    for (let i=0;i<=6;i++){
+      const px = x + (s.w/6)*i;
+      ctx.beginPath(); ctx.moveTo(px, y - 12 + squish); ctx.lineTo(cx, y + s.h + 8); ctx.stroke();
     }
-    ctx.restore();
-  } else {
-    // platform / step
-    ctx.fillStyle = THEME.plat; rr(x,y,s.w,s.h,8); ctx.fill();
-    ctx.fillStyle = THEME.platTop; ctx.fillRect(x, y, s.w, 8);
-    ctx.strokeStyle = THEME.platStroke; ctx.lineWidth = 3; rr(x,y,s.w,s.h,8); ctx.stroke();
+    for (let r=1;r<=3;r++){
+      ctx.beginPath();
+      for (let i=0;i<=6;i++){
+        const px = x + (s.w/6)*i;
+        const t = r/4;
+        const qx = px + (cx-px)*t, qy = (y-12+squish) + ((y+s.h+8)-(y-12+squish))*t;
+        if (i===0) ctx.moveTo(qx,qy); else ctx.lineTo(qx,qy);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#3b3b3b";
+    ctx.beginPath(); ctx.arc(cx + 34, y - 6, 7, 0, 7); ctx.fill();
+  } else if (s.type === "volcano"){
+    // volcano cone
+    ctx.fillStyle = "#6b5142";
+    ctx.beginPath();
+    ctx.moveTo(x - 34, y + s.h);
+    ctx.lineTo(x + s.w*0.22, y);
+    ctx.lineTo(x + s.w*0.78, y);
+    ctx.lineTo(x + s.w + 34, y + s.h);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#8a6a58";
+    ctx.beginPath();
+    ctx.moveTo(x + s.w*0.22, y); ctx.lineTo(x + s.w*0.78, y);
+    ctx.lineTo(x + s.w*0.66, y+16); ctx.lineTo(x + s.w*0.34, y+16);
+    ctx.closePath(); ctx.fill();
+    // glowing crater + drifting smoke
+    ctx.fillStyle = "#ff8b2b";
+    rr(x + s.w*0.3, y - 4, s.w*0.4, 12, 6); ctx.fill();
+    for (let i=0;i<4;i++){
+      const t = (tGlobal*0.6 + i*40) % 160;
+      ctx.fillStyle = "rgba(190,190,190," + (0.35 * (1 - t/160)).toFixed(3) + ")";
+      ctx.beginPath();
+      ctx.arc(x + s.w/2 + Math.sin(t*0.05 + i)*22, y - 14 - t*0.55, 12 + t*0.09, 0, 7);
+      ctx.fill();
+    }
+  } else if (s.type === "leaf"){
+    // big floating leaf you hop over
+    const bob = Math.sin(tGlobal*0.05 + s.x)*3;
+    ctx.fillStyle = "#4fa347";
+    ctx.beginPath();
+    ctx.ellipse(x + s.w/2, y + s.h/2 + bob, s.w/2, s.h/2, 0, 0, 7);
+    ctx.fill();
+    ctx.strokeStyle = "#2f7a2c"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + s.h/2 + bob); ctx.lineTo(x + s.w - 6, y + s.h/2 + bob);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    for (let i=1;i<4;i++){
+      const lx = x + (s.w/4)*i;
+      ctx.beginPath();
+      ctx.moveTo(lx, y + s.h/2 + bob);
+      ctx.lineTo(lx + 10, y + 8 + bob);
+      ctx.moveTo(lx, y + s.h/2 + bob);
+      ctx.lineTo(lx + 10, y + s.h - 8 + bob);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawWater(){
+  for (const wt of WATERS){
+    const x = worldX(wt.x), y = GROUND_Y - WATER_H;
+    if (x + wt.w < -40 || x > W+40) continue;
+    ctx.fillStyle = "rgba(70,170,230,0.62)";
+    ctx.fillRect(x, y, wt.w, WATER_H + 14);
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let i=0;i<wt.w;i+=20){
+      const wob = Math.sin(tGlobal*0.09 + (wt.x+i)*0.05)*2.5;
+      ctx.moveTo(x+i, y+4+wob);
+      ctx.quadraticCurveTo(x+i+10, y-2+wob, x+i+20, y+4+wob);
+    }
+    ctx.stroke();
+    // sparkles so the pools read as friendly, not deadly
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    for (let i=0;i<3;i++){
+      const sx = x + ((i*57 + tGlobal*0.6) % Math.max(20, wt.w));
+      ctx.beginPath(); ctx.arc(sx, y + 14 + Math.sin(tGlobal*0.07+i)*4, 2, 0, 7); ctx.fill();
+    }
   }
 }
 
 function drawHazard(hz){
   const x = worldX(hz.x), y = hz.y;
-  if (x + hz.w < -40 || x > W+40) return;
-  if (hz.kind === "spike"){
-    ctx.fillStyle = THEME.spikeFill;
-    const n = 3;
-    for (let i=0;i<n;i++){
-      const sx = x + i*(hz.w/n);
+  if (x + hz.w < -60 || x > W+60) return;
+  if (hz.kind === "quicksand"){
+    ctx.fillStyle = "#c9a86b";
+    rr(x, y, hz.w, hz.h + 10, 5); ctx.fill();
+    ctx.strokeStyle = "#8d7442"; ctx.lineWidth = 2.5;
+    for (let i=0;i<3;i++){
+      const sy = y + 6 + i*6;
+      const off = Math.sin(tGlobal*0.06 + i)*6;
       ctx.beginPath();
-      ctx.moveTo(sx, y+hz.h);
-      ctx.lineTo(sx + hz.w/(2*n), y);
-      ctx.lineTo(sx + hz.w/n, y+hz.h);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(x + 8 + off, sy);
+      ctx.lineTo(x + hz.w - 8 + off*0.5, sy);
+      ctx.stroke();
     }
-    ctx.strokeStyle=THEME.spikeStroke; ctx.lineWidth=2; ctx.stroke();
-  } else if (hz.kind === "water"){
-    ctx.fillStyle = THEME.water || "rgba(60,140,220,0.55)";
-    ctx.fillRect(x, y, hz.w, hz.h+30);
-    ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth=2;
+    // sinking bubbles
+    ctx.fillStyle = "rgba(120,95,50,0.55)";
+    for (let i=0;i<2;i++){
+      const bx = x + 18 + ((i*41 + tGlobal*0.4) % Math.max(20, hz.w - 36));
+      ctx.beginPath(); ctx.arc(bx, y + 4 + Math.sin(tGlobal*0.1+i)*2, 3.5, 0, 7); ctx.fill();
+    }
+  } else if (hz.kind === "poison"){
+    ctx.fillStyle = "rgba(126,62,168,0.85)";
+    ctx.fillRect(x, y, hz.w, hz.h);
+    ctx.strokeStyle = "rgba(190,255,120,0.85)"; ctx.lineWidth = 3;
     ctx.beginPath();
-    for (let i=0;i<hz.w;i+=20){
-      ctx.moveTo(x+i, y+3); ctx.quadraticCurveTo(x+i+10, y-2, x+i+20, y+3);
+    for (let i=0;i<hz.w;i+=18){
+      const wob = Math.sin(tGlobal*0.12 + i*0.1)*3;
+      ctx.moveTo(x+i, y+5+wob);
+      ctx.quadraticCurveTo(x+i+9, y-3+wob, x+i+18, y+5+wob);
     }
     ctx.stroke();
+    ctx.fillStyle = "rgba(190,255,120,0.7)";
+    for (let i=0;i<4;i++){
+      const bx = x + 12 + ((i*29 + tGlobal*0.5) % Math.max(20, hz.w - 24));
+      const by = y + hz.h - ((tGlobal*1.1 + i*37) % hz.h);
+      ctx.beginPath(); ctx.arc(bx, by, 3 + (i%2), 0, 7); ctx.fill();
+    }
+  } else if (hz.kind === "lowleaf"){
+    // heavy leaf cluster hanging from a vine — duck under it
+    const bob = Math.sin(tGlobal*0.045 + hz.x)*3;
+    ctx.strokeStyle = "#397d3a"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(x + hz.w/2, 0); ctx.lineTo(x + hz.w/2, y + 10 + bob); ctx.stroke();
+    ctx.fillStyle = "#2f6b31";
+    for (let i=0;i<4;i++){
+      const lx = x + 14 + i*((hz.w - 28)/3);
+      ctx.beginPath();
+      ctx.ellipse(lx, y + hz.h - 16 + bob, 20, 26, (i-1.5)*0.35, 0, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#4fa347";
+    for (let i=0;i<3;i++){
+      const lx = x + 24 + i*((hz.w - 48)/2);
+      ctx.beginPath();
+      ctx.ellipse(lx, y + hz.h - 24 + bob, 15, 20, (i-1)*0.4, 0, 7);
+      ctx.fill();
+    }
+  }
+}
+
+function drawLogs(){
+  for (const l of logs){
+    const x = worldX(l.x);
+    if (x + LOG_ZONE.w < -40 || x > W+40) continue;
+    const cx = x + LOG_ZONE.w/2, cy = l.y + LOG_ZONE.h/2;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.beginPath(); ctx.ellipse(cx, GROUND_Y + 2, LOG_ZONE.w*0.44, 6, 0, 0, 7); ctx.fill();
+    ctx.translate(cx, cy);
+    ctx.rotate(-l.x * 0.035);   // rolls as it travels
+    ctx.fillStyle = "#8a5f34";
+    rr(-LOG_ZONE.w/2, -LOG_ZONE.h/2, LOG_ZONE.w, LOG_ZONE.h, LOG_ZONE.h/2); ctx.fill();
+    ctx.strokeStyle = "#5f4020"; ctx.lineWidth = 3;
+    rr(-LOG_ZONE.w/2, -LOG_ZONE.h/2, LOG_ZONE.w, LOG_ZONE.h, LOG_ZONE.h/2); ctx.stroke();
+    // end rings
+    ctx.fillStyle = "#c08b52";
+    ctx.beginPath(); ctx.ellipse(-LOG_ZONE.w/2 + 11, 0, 8, LOG_ZONE.h/2 - 4, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#5f4020"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(-LOG_ZONE.w/2 + 11, 0, 4, LOG_ZONE.h/2 - 10, 0, 0, 7); ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -1181,18 +1166,17 @@ function drawSigns(){
   ctx.textAlign = "center";
   for (const sg of SIGNS){
     const x = worldX(sg.x);
-    if (x < -120 || x > W+120) continue;
-    const baseY = groundSurfaceY(sg.x);
+    if (x < -160 || x > W+160) continue;
     ctx.fillStyle = "#8a5a2b";
-    ctx.fillRect(x-3, baseY-70, 6, 70);
+    ctx.fillRect(x-3, GROUND_Y-70, 6, 70);
     const w = Math.max(90, sg.text.length*9);
     ctx.fillStyle = "#f7e2b0";
-    rr(x-w/2, baseY-110, w, 40, 8); ctx.fill();
+    rr(x-w/2, GROUND_Y-110, w, 40, 8); ctx.fill();
     ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth=3;
-    rr(x-w/2, baseY-110, w, 40, 8); ctx.stroke();
+    rr(x-w/2, GROUND_Y-110, w, 40, 8); ctx.stroke();
     ctx.fillStyle = "#5a3a16";
     ctx.font = "bold 15px 'Comic Sans MS', sans-serif";
-    ctx.fillText(sg.text, x, baseY-84);
+    ctx.fillText(sg.text, x, GROUND_Y-84);
   }
   ctx.restore();
 }
@@ -1203,7 +1187,7 @@ function drawCheckpoints(){
     const x = worldX(c.tx);
     if (x < -40 || x > W+40) continue;
     const reached = player.reachedCheck >= i;
-    ctx.strokeStyle = "#555"; ctx.lineWidth = 3;
+    ctx.strokeStyle = "#5a4a3a"; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(x, GROUND_Y); ctx.lineTo(x, GROUND_Y-60); ctx.stroke();
     ctx.fillStyle = reached ? "#41c75a" : "#e6b800";
     ctx.beginPath();
@@ -1213,13 +1197,11 @@ function drawCheckpoints(){
 }
 
 function drawStartFinish(){
-  // start line
   let x = worldX(START_LINE);
   if (x > -20 && x < W+20){
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillRect(x-2, GROUND_Y-120, 4, 120);
   }
-  // finish banner (checkered)
   x = worldX(FINISH_LINE);
   if (x > -60 && x < W+60){
     ctx.fillStyle = "#333"; ctx.fillRect(x-4, GROUND_Y-150, 8, 150);
@@ -1236,7 +1218,6 @@ function drawStartFinish(){
 }
 
 function drawCharacter(emoji, cx, cy, size, facing, baseDir, bob, squashY=1){
-  // soft shadow
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,0.18)";
   ctx.beginPath();
@@ -1246,7 +1227,6 @@ function drawCharacter(emoji, cx, cy, size, facing, baseDir, bob, squashY=1){
 
   ctx.save();
   ctx.translate(cx, cy - bob);
-  // mirror the emoji art so it faces the way the character is moving
   ctx.scale(facing === baseDir ? 1 : -1, squashY);
   ctx.font = size + "px 'Segoe UI Emoji','Apple Color Emoji',sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1254,10 +1234,10 @@ function drawCharacter(emoji, cx, cy, size, facing, baseDir, bob, squashY=1){
   ctx.restore();
 }
 
-function drawInk(){
+function drawParticles(){
   for (const p of inkParts){
     const f = p.life / p.max;
-    ctx.fillStyle = "rgba(" + (p.c || "54,20,74") + "," + ((1 - f) * (p.c ? 0.85 : 0.5)).toFixed(3) + ")";
+    ctx.fillStyle = "rgba(" + (p.c || "54,20,74") + "," + ((1 - f) * (p.c ? 0.8 : 0.5)).toFixed(3) + ")";
     ctx.beginPath();
     ctx.arc(worldX(p.x), p.y, p.r * (1 + f * 0.7), 0, 7);
     ctx.fill();
@@ -1265,72 +1245,47 @@ function drawInk(){
 }
 
 function drawPlayer(){
-  const a = player.animal;
+  const a = player.ch;
   const cx = worldX(player.x + player.w/2);
   const cy = player.y + player.h/2;
   const bob = Math.abs(Math.sin(player.runBob*0.15)) * 4;
   let squash = 1;
-  if (!player.grounded) squash = player.vy < 0 ? 1.08 : 0.94;
-  let face = player.facing;
-  if (player.distracted) face = -player.facing; // dog looks the other way
+  if (player.ducking) squash = 0.6;
+  else if (!player.grounded) squash = player.vy < 0 ? 1.08 : 0.94;
+  const size = player.ducking ? 42 : 46;
 
   if (player.hurtFlash > 0 && (player.hurtFlash >> 1) % 2 === 0) { /* blink: skip draw */ }
-  else drawCharacter(a.emoji, cx, cy, 46, face, a.faceDir, bob, squash);
+  else drawCharacter(a.emoji, cx, cy, size, player.facing, a.faceDir, bob, squash);
 
-  if (player.distracted){
-    ctx.fillStyle = "#fff"; ctx.strokeStyle="#333"; ctx.lineWidth=3;
-    ctx.font = "bold 26px sans-serif"; ctx.textAlign="center";
-    ctx.strokeText("?", cx, cy - 40); ctx.fillText("?", cx, cy - 40);
+  // the fish gasps when its air is nearly gone
+  if (a.airSpan && player.air < 180 && player.air > 0 && (tGlobal>>3)%2===0){
+    ctx.fillStyle = "#fff"; ctx.strokeStyle="#c33"; ctx.lineWidth=3;
+    ctx.font = "bold 24px sans-serif"; ctx.textAlign="center";
+    ctx.strokeText("!", cx, cy - 40); ctx.fillText("!", cx, cy - 40);
   }
 }
 
-function drawCow(){
-  const cx = worldX(cow.x + cow.w/2);
-  const cy = cow.y + cow.h/2;
-  if (RACER.kind === "candyfloss"){
-    // a big fluffy candyfloss ball rolling along the ground
-    const r = 27;
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.18)";
-    ctx.beginPath();
-    ctx.ellipse(cx, cow.y + cow.h, r*0.9, 7, 0, 0, 7);
-    ctx.fill();
-    ctx.translate(cx, cy);
-    ctx.rotate(cow.x * 0.045); // roll with distance travelled
-    ctx.fillStyle = "#ff9fd6";
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
-    // fluffy lobes around the edge
-    ctx.fillStyle = "#ffb3e0";
-    for (let i=0;i<6;i++){
-      const a2 = i * Math.PI/3;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a2)*r*0.85, Math.sin(a2)*r*0.85, r*0.42, 0, 7);
-      ctx.fill();
-    }
-    // swirl so the rolling reads clearly
-    ctx.strokeStyle = "#e878ba"; ctx.lineWidth = 3.5;
-    ctx.beginPath(); ctx.arc(0, 0, r*0.55, 0, Math.PI*1.35); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, r*0.25, Math.PI, Math.PI*2.4); ctx.stroke();
-    ctx.restore();
-  } else {
-    const bob = (state === "race") ? Math.abs(Math.sin(cow.anim))*5 : 0;
-    drawCharacter(RACER.emoji, cx, cy, 54, 1, 1, bob, 1);
-  }
+function drawGecko(){
+  const cx = worldX(gecko.x + gecko.w/2);
+  const cy = gecko.y + gecko.h/2;
+  const bob = (state === "race") ? Math.abs(Math.sin(gecko.anim))*5 : 0;
+  drawCharacter("🦎", cx, cy, 52, 1, -1, bob, 1);
 }
 
+// ------------------------------------------------------------------
+// HUD + touch controls
+// ------------------------------------------------------------------
 function drawHUD(){
-  // animal + progress bar
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.85)";
   rr(12, 12, 230, 40, 10); ctx.fill();
   ctx.textAlign = "left"; ctx.textBaseline = "middle";
   ctx.font = "26px 'Segoe UI Emoji', sans-serif";
-  ctx.fillText(player.animal.emoji, 22, 33);
+  ctx.fillText(player.ch.emoji, 22, 33);
   ctx.fillStyle = "#234";
   ctx.font = "bold 15px 'Comic Sans MS', sans-serif";
-  ctx.fillText(player.animal.name, 56, 33);
+  ctx.fillText(player.ch.name, 56, 33);
 
-  // progress
   const px = 120, pw = 110;
   ctx.fillStyle = "#cfd6dd"; rr(px, 24, pw, 14, 7); ctx.fill();
   const prog = Math.max(0, Math.min(1, player.x / FINISH_LINE));
@@ -1338,8 +1293,8 @@ function drawHUD(){
   ctx.font = "16px 'Segoe UI Emoji', sans-serif";
   ctx.fillText("🏁", px + pw, 33);
 
-  // dash recharge meter (octopus only)
-  if (player.animal.dash){
+  // ink dash recharge (octopus)
+  if (player.ch.dash){
     const ready = player.dashCooldown <= 0;
     const frac = ready ? 1 : 1 - player.dashCooldown / DASH_COOLDOWN;
     ctx.fillStyle = "rgba(255,255,255,0.85)";
@@ -1356,31 +1311,24 @@ function drawHUD(){
     }
   }
 
-  // one-use flight badge (unicorn only)
-  if (player.animal.flyOnce){
-    const flying = player.flyTimer > 0;
+  // air span (fish)
+  if (player.ch.airSpan){
+    const frac = Math.max(0, player.air / player.ch.airSpan);
+    const low = player.air < 180;
     ctx.fillStyle = "rgba(255,255,255,0.85)";
-    rr(252, 12, 116, 38, 10); ctx.fill();
+    rr(252, 12, 150, 38, 10); ctx.fill();
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.font = "18px 'Segoe UI Emoji', sans-serif";
-    ctx.fillText("✨", 260, 31);
+    ctx.fillText("💧", 260, 31);
+    ctx.fillStyle = "#cfd6dd"; rr(288, 24, 76, 14, 7); ctx.fill();
+    ctx.fillStyle = low ? ((tGlobal>>2)%2 ? "#ff4d4d" : "#ffb0b0") : "#3fa9e0";
+    rr(288, 24, 76 * frac, 14, 7); ctx.fill();
+    ctx.fillStyle = low ? "#c62828" : "#234";
     ctx.font = "bold 13px 'Comic Sans MS', sans-serif";
-    if (flying){
-      ctx.fillStyle = "#b06fd0";
-      ctx.fillText("FLYING!", 288, 31);
-    } else if (player.flyLeft <= 0){
-      ctx.fillStyle = "#9aa3ad";
-      ctx.fillText("FLY USED", 288, 31);
-    } else if (player.flyLeft > 1){
-      ctx.fillStyle = "#2c8a3e";
-      ctx.fillText("FLY ×" + player.flyLeft, 288, 31);
-    } else {
-      ctx.fillStyle = "#2c8a3e";
-      ctx.fillText("FLY READY", 288, 31);
-    }
+    ctx.fillText(Math.ceil(player.air/60) + "s", 370, 31);
   }
 
-  // run timer (top center)
+  // run timer
   const tw = 134;
   ctx.fillStyle = "rgba(255,255,255,0.85)";
   rr(W/2 - tw/2, 12, tw, 38, 10); ctx.fill();
@@ -1388,22 +1336,93 @@ function drawHUD(){
   ctx.font = "bold 20px 'Comic Sans MS', sans-serif";
   ctx.fillText("⏱ " + formatTime(runMs), W/2, 32);
 
+  // pause button
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.beginPath(); ctx.arc(BTN_PAUSE.cx, BTN_PAUSE.cy, BTN_PAUSE.r, 0, 7); ctx.fill();
+  ctx.fillStyle = "#234";
+  ctx.fillRect(BTN_PAUSE.cx - 7, BTN_PAUSE.cy - 9, 5, 18);
+  ctx.fillRect(BTN_PAUSE.cx + 2, BTN_PAUSE.cy - 9, 5, 18);
+
   if (muted){
     ctx.fillStyle = "#234"; ctx.font = "bold 13px sans-serif"; ctx.textAlign="right";
-    ctx.fillText("🔇 muted (M)", W-14, 22);
+    ctx.fillText("🔇", W-58, 24);
   }
   ctx.restore();
 }
 
-// ---- overlay screens ----
-function dim(alpha){ ctx.fillStyle = `rgba(10,16,32,${alpha})`; ctx.fillRect(0,0,W,H); }
+function drawTouchControls(){
+  if (!touchMode) return;
+  ctx.save();
+
+  // left drag stick
+  ctx.globalAlpha = touch.stickId !== null ? 0.7 : 0.5;
+  ctx.fillStyle = "#0d2a12";
+  rr(STICK.cx - STICK.w/2, STICK.cy - STICK.h/2, STICK.w, STICK.h, STICK.h/2); ctx.fill();
+  ctx.globalAlpha = touch.stickId !== null ? 0.95 : 0.8;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+  rr(STICK.cx - STICK.w/2, STICK.cy - STICK.h/2, STICK.w, STICK.h, STICK.h/2); ctx.stroke();
+  // arrows
+  ctx.fillStyle = "#fff";
+  for (const s of [-1, 1]){
+    const ax = STICK.cx + s * (STICK.w/2 - 24);
+    ctx.beginPath();
+    ctx.moveTo(ax - s*8, STICK.cy - 11);
+    ctx.lineTo(ax + s*9, STICK.cy);
+    ctx.lineTo(ax - s*8, STICK.cy + 11);
+    ctx.closePath(); ctx.fill();
+  }
+  // knob
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = touch.stickId !== null ? "#ffe14d" : "#eef6ee";
+  ctx.beginPath(); ctx.arc(STICK.cx + touch.knob, STICK.cy, STICK.knobR, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#0d2a12"; ctx.lineWidth = 3; ctx.stroke();
+
+  // right buttons
+  const inkMode = player.ch.dash;
+  ctx.globalAlpha = touch.jumpDown ? 1 : 0.85;
+  ctx.fillStyle = touch.jumpDown ? "#ffd24d" : (inkMode ? "#b15bd0" : "#4fb04f");
+  ctx.beginPath(); ctx.arc(BTN_JUMP.cx, BTN_JUMP.cy, BTN_JUMP.r, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#0d2a12"; ctx.lineWidth = 4; ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "bold 19px 'Comic Sans MS', sans-serif";
+  ctx.fillText(inkMode ? "INK" : "JUMP", BTN_JUMP.cx, BTN_JUMP.cy);
+
+  ctx.globalAlpha = touch.duckDown ? 1 : 0.85;
+  ctx.fillStyle = touch.duckDown ? "#ffd24d" : "#3f7fc4";
+  ctx.beginPath(); ctx.arc(BTN_DUCK.cx, BTN_DUCK.cy, BTN_DUCK.r, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#0d2a12"; ctx.lineWidth = 4; ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 17px 'Comic Sans MS', sans-serif";
+  ctx.fillText("DUCK", BTN_DUCK.cx, BTN_DUCK.cy);
+
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------
+// Overlay screens
+// ------------------------------------------------------------------
+function bigButton(id, cx, cy, w, h, label, fill="#41c75a", size=26){
+  const x = cx - w/2, y = cy - h/2;
+  ctx.save();
+  ctx.fillStyle = fill;
+  rr(x, y, w, h, 14); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 4;
+  rr(x, y, w, h, 14); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `bold ${size}px 'Comic Sans MS', sans-serif`;
+  ctx.fillText(label, cx, cy);
+  ctx.restore();
+  uiButton(id, x, y, w, h);
+}
 
 function drawToast(){
   if (toastT <= 0) return;
   ctx.save();
   ctx.globalAlpha = Math.min(1, toastT/18);
-  const w = 270, h = 46;
-  ctx.fillStyle = "rgba(20,30,55,0.92)";
+  const w = 290, h = 46;
+  ctx.fillStyle = "rgba(12,32,18,0.92)";
   rr(W/2 - w/2, H - 74, w, h, 12); ctx.fill();
   ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2;
   rr(W/2 - w/2, H - 74, w, h, 12); ctx.stroke();
@@ -1412,118 +1431,121 @@ function drawToast(){
   ctx.fillText(toast, W/2, H - 51);
   ctx.restore();
 }
-function centerText(text, y, size, color="#fff", weight="bold"){
-  ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.font = `${weight} ${size}px 'Comic Sans MS', sans-serif`;
-  ctx.fillText(text, W/2, y);
-}
 
 function drawTitle(){
   drawBackground();
-  // bouncing title animals
-  const row = ["🐎","🐇","🐸","🐕","🐙"];
+  const row = ["🐯","🐙","🐠"];
   row.forEach((e,i)=>{
-    const x = W/2 - 130 + i*65;
-    const y = 360 + Math.sin(tGlobal*0.06 + i)*12;
-    ctx.font = "48px 'Segoe UI Emoji', sans-serif"; ctx.textAlign="center";
+    const x = W/2 - 80 + i*80;
+    const y = 404 + Math.sin(tGlobal*0.06 + i)*10;
+    ctx.font = "52px 'Segoe UI Emoji', sans-serif"; ctx.textAlign="center";
     ctx.fillText(e, x, y);
   });
   ctx.save();
-  centerText("DESENIA", 150, 72, "#fff");
-  ctx.strokeStyle = "#234a8a"; ctx.lineWidth=4;
-  ctx.strokeText("DESENIA", W/2, 150);
-  centerText("ANIMAL DASH", 215, 46, "#ffe14d");
-  ctx.strokeStyle = "#b07b00"; ctx.lineWidth=3; ctx.strokeText("ANIMAL DASH", W/2, 215);
+  centerText("ANIMALANDIA", 120, 68, "#fff");
+  ctx.strokeStyle = "#1d5a24"; ctx.lineWidth=5;
+  ctx.strokeText("ANIMALANDIA", W/2, 120);
+  centerText(LEVEL_NAME, 178, 34, "#ffe14d");
+  ctx.strokeStyle = "#7a5a00"; ctx.lineWidth=3; ctx.strokeText(LEVEL_NAME, W/2, 178);
   ctx.restore();
-  centerText("Pick a level, pick an animal, race the cow!", 270, 22, "#234", "bold");
-  if ((tGlobal>>5)%2===0) centerText("Press SPACE to start", 435, 26, "#fff");
-  centerText("← → move    SPACE / ↑ jump    P pause    M mute", 490, 16, "#dfe", "");
-  centerText("Created by Zoë", 522, 20, "#ffe14d");
+  centerText("Pick an animal and race the gecko!", 224, 20, "#123", "bold");
+
+  bigButton("play", W/2, 268, 260, 60, "PLAY");
+  bigButton("scores", W/2, 340, 260, 52, "HIGH SCORES", "#3f7fc4", 22);
+
+  centerText(touchMode ? "Drag to move   ·   JUMP   ·   hold DUCK"
+                       : "← → move   SPACE jump   ↓ duck   P pause   M mute", 464, 16, "#eff", "");
+  centerText("Created by Mateo", 506, 20, "#ffe14d");
 }
 
-function drawLevels(){
-  drawBackground();
-  dim(0.35);
-  centerText("Pick a level!", 70, 40, "#fff");
-  const n = LEVELS.length;
-  const cardW = 250, cardH = 250, gap = 40;
-  const totalW = n*cardW + (n-1)*gap;
-  const x0 = (W - totalW)/2;
-  for (let i=0;i<n;i++){
-    const L = LEVELS[i];
-    const x = x0 + i*(cardW+gap);
-    const sel = i === levelIndex;
-    const y = 130 + (sel ? -10 : 0);
-    ctx.save();
-    ctx.fillStyle = sel ? "#fff5d6" : "rgba(255,255,255,0.8)";
-    rr(x, y, cardW, cardH, 14); ctx.fill();
-    ctx.strokeStyle = sel ? "#ffb300" : "#9aa"; ctx.lineWidth = sel?6:3;
-    rr(x, y, cardW, cardH, 14); ctx.stroke();
-    ctx.textAlign = "center";
-    const bob = sel ? Math.sin(tGlobal*0.12)*6 : 0;
-    ctx.font = "72px 'Segoe UI Emoji', sans-serif";
-    ctx.fillText(L.icon, x+cardW/2, y+95+bob);
-    ctx.fillStyle = "#b07b00"; ctx.font = "bold 16px 'Comic Sans MS',sans-serif";
-    ctx.fillText("LEVEL " + (i+1), x+cardW/2, y+140);
-    ctx.fillStyle = "#234"; ctx.font = "bold 24px 'Comic Sans MS',sans-serif";
-    ctx.fillText(L.name, x+cardW/2, y+172);
-    ctx.restore();
-  }
-  // blurb of selected
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  rr(W/2-260, 410, 520, 56, 12); ctx.fill();
-  centerText(LEVELS[levelIndex].blurb, 438, 18, "#234", "bold");
-  if ((tGlobal>>5)%2===0) centerText("← →  choose      SPACE  go!", 505, 22, "#fff");
+function statBar(x,y,label,frac){
+  ctx.textAlign="left"; ctx.fillStyle="#456";
+  ctx.font = "12px 'Comic Sans MS',sans-serif";
+  ctx.fillText(label, x, y+9);
+  const bx = x+52, bw=74;
+  ctx.fillStyle="#cfd6dd"; rr(bx,y,bw,10,5); ctx.fill();
+  ctx.fillStyle="#41a7c7"; rr(bx,y, bw*Math.max(0.08,Math.min(1,frac)),10,5); ctx.fill();
+  ctx.textAlign="center";
 }
 
 function drawPick(){
   drawBackground();
   dim(0.35);
-  centerText("Pick your animal!", 58, 40, "#fff");
-  centerText("Level " + (levelIndex+1) + ": " + currentLevel.name, 96, 19, "#ffe14d");
-  const n = ROSTER.length;
-  const cardW = 150, gap = 18;
+  centerText("Pick your animal!", 52, 38, "#fff");
+  const n = CHARS.length;
+  const cardW = 200, gap = 26;
   const totalW = n*cardW + (n-1)*gap;
   const x0 = (W - totalW)/2;
   for (let i=0;i<n;i++){
-    const a = ROSTER[i];
+    const c = CHARS[i];
     const x = x0 + i*(cardW+gap);
     const sel = i === pickIndex;
-    const y = 140 + (sel ? -10 : 0);
+    const y = 104 + (sel ? -10 : 0);
     ctx.save();
-    ctx.fillStyle = sel ? "#fff5d6" : "rgba(255,255,255,0.8)";
-    rr(x, y, cardW, 230, 14); ctx.fill();
+    ctx.fillStyle = sel ? "#fff5d6" : "rgba(255,255,255,0.82)";
+    rr(x, y, cardW, 250, 14); ctx.fill();
     ctx.strokeStyle = sel ? "#ffb300" : "#9aa"; ctx.lineWidth = sel?6:3;
-    rr(x, y, cardW, 230, 14); ctx.stroke();
+    rr(x, y, cardW, 250, 14); ctx.stroke();
     ctx.textAlign = "center";
     const bob = sel ? Math.sin(tGlobal*0.12)*6 : 0;
-    ctx.font = "64px 'Segoe UI Emoji', sans-serif";
+    ctx.font = "74px 'Segoe UI Emoji', sans-serif";
     ctx.save();
-    ctx.translate(x+cardW/2, y+80+bob);
-    ctx.scale(a.faceDir === 1 ? 1 : -1, 1); // face right on the card too
-    ctx.fillText(a.emoji, 0, 0);
+    ctx.translate(x+cardW/2, y+86+bob);
+    ctx.scale(c.faceDir === 1 ? 1 : -1, 1);
+    ctx.fillText(c.emoji, 0, 0);
     ctx.restore();
-    ctx.fillStyle = "#234"; ctx.font = "bold 20px 'Comic Sans MS',sans-serif";
-    ctx.fillText(a.name, x+cardW/2, y+125);
-    // stat pips
-    ctx.font = "12px 'Comic Sans MS',sans-serif";
-    statBar(x+18, y+150, "Speed", a.run/4.5);
-    statBar(x+18, y+172, "Jump", a.jump/15.5);
+    ctx.fillStyle = "#234"; ctx.font = "bold 22px 'Comic Sans MS',sans-serif";
+    ctx.fillText(c.name, x+cardW/2, y+142);
+    statBar(x+22, y+168, "Speed", c.run/4.8);
+    statBar(x+22, y+192, "Jump", c.jump/14);
+    statBar(x+22, y+216, "Swim", c.swim ? 1 : (c.tough ? 0.7 : 0.2));
+    ctx.restore();
+    uiButton("card"+i, x, y, cardW, 250);
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  rr(W/2-330, 372, 660, 50, 12); ctx.fill();
+  centerText(CHARS[pickIndex].blurb, 397, 17, "#234", "bold");
+
+  bigButton("go", W/2 - 100, 468, 200, 52, "GO!");
+  bigButton("scores", W/2 + 130, 468, 220, 44, "HIGH SCORES", "#3f7fc4", 19);
+}
+
+function drawScores(){
+  drawBackground();
+  dim(0.6);
+  const cx = W/2;
+  centerText("🏆 HIGH SCORES 🏆", 60, 40, "#ffe14d");
+  centerText(LEVEL_NAME, 98, 20, "#cfe");
+  const list = Leaderboard.load();
+  if (list.length === 0){
+    centerText("No times yet — you could be the first!", 220, 22, "#fff");
+  } else {
+    const rowH = 30, w = 460, y0 = 146;
+    ctx.save();
+    ctx.textBaseline = "middle";
+    for (let i=0;i<list.length;i++){
+      const e = list[i], ry = y0 + i*rowH;
+      if (i === 0){
+        ctx.fillStyle = "rgba(255,225,77,0.22)";
+        rr(cx-w/2, ry-rowH/2+1, w, rowH-2, 6); ctx.fill();
+        ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2;
+        rr(cx-w/2, ry-rowH/2+1, w, rowH-2, 6); ctx.stroke();
+      }
+      ctx.fillStyle = i === 0 ? "#fff" : "#e8eef5";
+      ctx.font = (i === 0 ? "bold " : "") + "17px 'Comic Sans MS', sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("#" + (i+1), cx-w/2+16, ry);
+      ctx.font = "20px 'Segoe UI Emoji', sans-serif";
+      ctx.fillText(e.a, cx-w/2+64, ry);
+      ctx.font = (i === 0 ? "bold " : "") + "17px 'Comic Sans MS', sans-serif";
+      ctx.fillText(e.n, cx-w/2+98, ry);
+      ctx.textAlign = "right";
+      ctx.fillText(formatTime(e.t), cx+w/2-16, ry);
+    }
     ctx.restore();
   }
-  // blurb of selected
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  rr(W/2-260, 400, 520, 56, 12); ctx.fill();
-  centerText(ROSTER[pickIndex].blurb, 428, 18, "#234", "bold");
-  if ((tGlobal>>5)%2===0) centerText("← →  choose      SPACE  go!", 500, 22, "#fff");
-}
-function statBar(x,y,label,frac){
-  ctx.textAlign="left"; ctx.fillStyle="#456";
-  ctx.fillText(label, x, y+9);
-  const bx = x+48, bw=68;
-  ctx.fillStyle="#cfd6dd"; rr(bx,y,bw,10,5); ctx.fill();
-  ctx.fillStyle="#41a7c7"; rr(bx,y, bw*Math.max(0.1,Math.min(1,frac)),10,5); ctx.fill();
-  ctx.textAlign="center";
+  bigButton("back", W/2 - 110, 486, 200, 48, "BACK", "#41c75a", 24);
+  bigButton("reset", W/2 + 130, 486, 210, 40, "CLEAR TIMES", "#c25a5a", 17);
 }
 
 function drawCountdown(){
@@ -1537,105 +1559,61 @@ function drawCountdown(){
   ctx.translate(W/2, 180);
   ctx.scale(scale, scale);
   centerText(label, 0, 90, countdownStep===0 ? "#ffe14d" : "#fff");
-  ctx.lineWidth=5; ctx.strokeStyle="#234a8a";
+  ctx.lineWidth=5; ctx.strokeStyle="#1d5a24";
   ctx.strokeText(label, 0, 0);
   ctx.restore();
   centerText("Ready…", 90, 26, "#fff");
-}
-
-function formatTime(ms){
-  const s = ms/1000, m = Math.floor(s/60), sec = s - m*60;
-  return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(1);
-}
-
-function drawLeaderboard(cx, top, highlight){
-  const list = Leaderboard.load();
-  const rowH = 26, w = 380;
-  ctx.save();
-  ctx.textBaseline = "middle"; ctx.textAlign = "center";
-  ctx.fillStyle = "#ffe14d"; ctx.font = "bold 21px 'Comic Sans MS', sans-serif";
-  ctx.fillText("🏆 Best Times — " + currentLevel.name, cx, top);
-  const y0 = top + 28;
-  if (list.length === 0){
-    ctx.fillStyle = "#cfe"; ctx.font = "16px 'Comic Sans MS', sans-serif";
-    ctx.fillText("No times yet — you could be the first!", cx, y0 + 8);
-    ctx.restore(); return;
-  }
-  for (let i = 0; i < list.length; i++){
-    const e = list[i], ry = y0 + i*rowH;
-    if (i === highlight){
-      ctx.fillStyle = "rgba(255,225,77,0.28)";
-      rr(cx-w/2, ry-rowH/2+1, w, rowH-2, 6); ctx.fill();
-      ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2;
-      rr(cx-w/2, ry-rowH/2+1, w, rowH-2, 6); ctx.stroke();
-    }
-    const bold = i === highlight;
-    ctx.fillStyle = bold ? "#fff" : "#e8eef5";
-    ctx.font = (bold ? "bold " : "") + "16px 'Comic Sans MS', sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText("#" + (i+1), cx-w/2+14, ry);
-    ctx.font = "18px 'Segoe UI Emoji', sans-serif";
-    ctx.fillText(e.a, cx-w/2+58, ry);
-    ctx.font = (bold ? "bold " : "") + "16px 'Comic Sans MS', sans-serif";
-    ctx.fillText(e.n, cx-w/2+88, ry);
-    ctx.textAlign = "right";
-    ctx.fillText(formatTime(e.t), cx+w/2-14, ry);
-  }
-  ctx.restore();
 }
 
 function drawEnd(win){
   dim(0.62);
   const cx = W/2;
   if (win){
-    // confetti — extra lively when you make the board
     const pieces = lastRank >= 0 ? 64 : 38;
     for (let i = 0; i < pieces; i++){
       const t = (tGlobal*4 + i*37);
       ctx.fillStyle = ["#ff5a5a","#5aff8a","#5aa8ff","#ffe14d","#ff8ad8"][i%5];
       ctx.fillRect((i*47 + t)%W, (i*29 + t*1.3)%H, 7, 11);
     }
-    centerText("🎉 YOU WIN! 🎉", 56, 44, "#ffe14d");
-    centerText("Your time:  " + formatTime(lastTime), 96, 24, "#fff");
+    centerText("🎉 YOU WIN! 🎉", 70, 44, "#ffe14d");
+    centerText("Your time:  " + formatTime(lastTime), 118, 26, "#fff");
     if (lastRank >= 0){
-      const msg = lastRank === 0
-        ? "🏆 NEW BEST TIME! 🏆"
-        : "⭐ TOP 10 — you're #" + (lastRank+1) + "! ⭐";
+      const msg = lastRank === 0 ? "🏆 NEW BEST TIME! 🏆"
+                                 : "⭐ HIGH SCORE — you're #" + (lastRank+1) + "! ⭐";
       const pulse = 1 + Math.sin(tGlobal*0.2)*0.07;
-      ctx.save(); ctx.translate(cx, 132); ctx.scale(pulse, pulse);
+      ctx.save(); ctx.translate(cx, 176); ctx.scale(pulse, pulse);
       ctx.fillStyle = "#8fff5a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.font = "bold 24px 'Comic Sans MS', sans-serif";
+      ctx.font = "bold 26px 'Comic Sans MS', sans-serif";
       ctx.fillText(msg, 0, 0); ctx.restore();
-      drawLeaderboard(cx, 174, lastRank);
-    } else {
-      drawLeaderboard(cx, 150, -1);
     }
   } else {
-    centerText("So close!", 56, 44, "#fff");
-    centerText("The " + RACER.name + " won this time " + RACER.emoji + " — try again!", 96, 22, "#ffd2d2");
-    drawLeaderboard(cx, 150, -1);
+    centerText("So close!", 80, 44, "#fff");
+    centerText("The gecko won this time 🦎 — try again!", 130, 24, "#ffd2d2");
   }
-  centerText("Press SPACE to pick a level & play again", 504, 22, "#fff");
-  centerText("(press R to reset the best times)", 528, 13, "#9fb0c0", "");
+  bigButton("again", cx, 300, 300, 62, "PLAY AGAIN");
+  bigButton("scores", cx, 380, 300, 50, "HIGH SCORES", "#3f7fc4", 22);
 }
 
+// ------------------------------------------------------------------
+// Render
+// ------------------------------------------------------------------
 function render(){
-  if (state === "title"){ drawTitle(); return; }
-  if (state === "levels"){ drawLevels(); return; }
-  if (state === "pick"){ drawPick(); return; }
+  uiButtons = [];
+  if (state === "title"){ drawTitle(); drawToast(); return; }
+  if (state === "scores"){ drawScores(); drawToast(); return; }
+  if (state === "pick"){ drawPick(); drawToast(); return; }
 
-  // world
   drawBackground();
-  drawSwirls();
   drawTrees();
   for (const s of SOLIDS) drawSolid(s);
-  drawSlopes();
+  drawWater();
   for (const hz of HAZARDS) drawHazard(hz);
+  drawLogs();
   drawCheckpoints();
   drawStartFinish();
   drawSigns();
-  if (raceStarted || state==="race" || state==="countdown") drawCow();
-  drawInk();
+  if (raceStarted) drawGecko();
+  drawParticles();
   drawPlayer();
   if (state !== "win" && state !== "lose") drawHUD();
 
@@ -1644,9 +1622,12 @@ function render(){
   if (state === "lose") drawEnd(false);
   if (state === "paused"){
     dim(0.55);
-    centerText("⏸ Paused", 230, 50, "#fff");
-    centerText("Press P to keep playing", 300, 24, "#cfe");
+    centerText("⏸ Paused", 190, 50, "#fff");
+    bigButton("resume", W/2, 290, 280, 60, "KEEP PLAYING");
   }
+  // controls sit on top of everything, so the countdown never covers them
+  if (playing()) drawTouchControls();
+  drawToast();
 }
 
 // ------------------------------------------------------------------
@@ -1663,11 +1644,20 @@ function frame(now){
     acc -= STEP;
   }
   render();
-  drawToast();
   Music.sync();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// TEMP dev hook for testing — remove before shipping
+window.__dev = {
+  get state(){ return state; }, set state(v){ state = v; },
+  player, gecko, CHARS, Leaderboard, SOLIDS, HAZARDS, WATERS, LOG_ZONE, CHECKPOINTS,
+  get logs(){ return logs; },
+  get runMs(){ return runMs; },
+  pick(i){ resetPlayer(CHARS[i]); state = "playing"; },
+  tp(x){ player.x = x; player.y = GROUND_Y - PH - 10; player.vx = 0; player.vy = 0; },
+};
 
 })();
 </script>
