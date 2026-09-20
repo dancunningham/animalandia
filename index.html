@@ -390,9 +390,9 @@ const ICE_SOLIDS = [
   // melting ice platforms across the crevasse: 3 seconds each, then they drop away.
   // Wide slabs with short gaps, so a full tiger pounce still lands on the next one.
   { x:6750, y:400, w:170, h:22, type:"melt" },
-  { x:7015, y:400, w:170, h:22, type:"melt" },
-  { x:7280, y:400, w:170, h:22, type:"melt" },
-  { x:7545, y:400, w:170, h:22, type:"melt" },
+  { x:7000, y:400, w:170, h:22, type:"melt" },
+  { x:7250, y:400, w:170, h:22, type:"melt" },
+  { x:7500, y:400, w:210, h:22, type:"melt" },
   // ice block staircase
   { x:9790, y:420, w:130, h:50,  type:"iceblock" },
   { x:9920, y:370, w:130, h:100, type:"iceblock" },
@@ -886,6 +886,8 @@ function respawn(){
   player.launched = false;
   player.hurtFlash = 18;
   if (player.ch.airSpan) player.air = player.ch.airSpan;
+  // freeze every ice platform back so a retry always gets a full crossing
+  for (const m of MELTS){ m.timer = -1; m.broken = false; m.regrow = 0; }
 }
 
 // ------------------------------------------------------------------
@@ -940,6 +942,10 @@ function onRink(){
 function waterAt(){
   const foot = player.y + player.h;
   const cx = player.x + player.w/2;
+  // on an icy level the ice platforms and ice blocks are ice too, so standing on
+  // one tops the fish up — without this the crevasse is longer than its 10 seconds
+  if (THEME.refill === "ice" && player.standing &&
+      (player.standing.type === "melt" || player.standing.type === "iceblock")) return player.standing;
   for (const wt of WATERS){
     if (cx >= wt.x && cx <= wt.x + wt.w && foot > GROUND_Y - WATER_H && foot <= GROUND_Y + 6) return wt;
   }
@@ -2644,21 +2650,6 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-
-// TEMP dev hook for testing — remove before shipping
-window.__dev = {
-  get state(){ return state; }, set state(v){ state = v; },
-  player, gecko, CHARS, LEVELS, Leaderboard,
-  get runMs(){ return runMs; },
-  get SOLIDS(){ return SOLIDS; }, get HAZARDS(){ return HAZARDS; },
-  get WATERS(){ return WATERS; }, get MELTS(){ return MELTS; },
-  get ICICLES(){ return ICICLES; }, get snowballs(){ return snowballs; },
-  get LOG_ZONE(){ return LOG_ZONE; }, get logs(){ return logs; },
-  get FINISH(){ return FINISH_LINE; },
-  level(i){ loadLevel(i); },
-  pick(i){ resetPlayer(CHARS[i]); state = "playing"; },
-  tp(x){ player.x = x; player.y = GROUND_Y - PH - 10; player.vx = 0; player.vy = 0; },
-};
 
 })();
 </script>
