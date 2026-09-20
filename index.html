@@ -60,6 +60,192 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 // ------------------------------------------------------------------
+// Language — Spanish if you are nearer Colombia, English if nearer England
+// ------------------------------------------------------------------
+// Rough home cities for the two languages.
+const LANG_ANCHORS = [
+  { lang:"es", lat:4.71,  lon:-74.07 },   // Bogotá, Colombia
+  { lang:"en", lat:51.51, lon:-0.13  },   // London, England
+];
+
+// Where the common time zones sit, so we can guess the player's position
+// without ever asking for GPS permission.
+const TZ_POINTS = {
+  "America/Bogota":[4.7,-74.1], "America/Lima":[-12.0,-77.0], "America/Caracas":[10.5,-66.9],
+  "America/Guayaquil":[-2.2,-79.9], "America/Panama":[9.0,-79.5], "America/Mexico_City":[19.4,-99.1],
+  "America/Santiago":[-33.4,-70.7], "America/Argentina/Buenos_Aires":[-34.6,-58.4],
+  "America/Sao_Paulo":[-23.5,-46.6], "America/La_Paz":[-16.5,-68.1], "America/Asuncion":[-25.3,-57.6],
+  "America/Montevideo":[-34.9,-56.2], "America/Havana":[23.1,-82.4], "America/Santo_Domingo":[18.5,-69.9],
+  "America/Guatemala":[14.6,-90.5], "America/Costa_Rica":[9.9,-84.1], "America/Tegucigalpa":[14.1,-87.2],
+  "America/Managua":[12.1,-86.3], "America/El_Salvador":[13.7,-89.2], "America/Puerto_Rico":[18.5,-66.1],
+  "America/New_York":[40.7,-74.0], "America/Toronto":[43.7,-79.4], "America/Chicago":[41.9,-87.6],
+  "America/Denver":[39.7,-105.0], "America/Phoenix":[33.4,-112.1], "America/Los_Angeles":[34.1,-118.2],
+  "America/Vancouver":[49.3,-123.1], "America/Anchorage":[61.2,-149.9], "Pacific/Honolulu":[21.3,-157.9],
+  "Europe/London":[51.5,-0.1], "Europe/Dublin":[53.3,-6.3], "Europe/Lisbon":[38.7,-9.1],
+  "Europe/Madrid":[40.4,-3.7], "Europe/Paris":[48.9,2.4], "Europe/Brussels":[50.8,4.4],
+  "Europe/Amsterdam":[52.4,4.9], "Europe/Berlin":[52.5,13.4], "Europe/Zurich":[47.4,8.5],
+  "Europe/Rome":[41.9,12.5], "Europe/Vienna":[48.2,16.4], "Europe/Prague":[50.1,14.4],
+  "Europe/Warsaw":[52.2,21.0], "Europe/Stockholm":[59.3,18.1], "Europe/Oslo":[59.9,10.8],
+  "Europe/Copenhagen":[55.7,12.6], "Europe/Helsinki":[60.2,24.9], "Europe/Athens":[38.0,23.7],
+  "Europe/Istanbul":[41.0,29.0], "Europe/Moscow":[55.8,37.6], "Europe/Kyiv":[50.5,30.5],
+  "Africa/Lagos":[6.5,3.4], "Africa/Cairo":[30.0,31.2], "Africa/Johannesburg":[-26.2,28.0],
+  "Africa/Nairobi":[-1.3,36.8], "Africa/Casablanca":[33.6,-7.6],
+  "Asia/Dubai":[25.2,55.3], "Asia/Karachi":[24.9,67.0], "Asia/Kolkata":[19.1,72.9],
+  "Asia/Bangkok":[13.8,100.5], "Asia/Singapore":[1.4,103.8], "Asia/Hong_Kong":[22.3,114.2],
+  "Asia/Shanghai":[31.2,121.5], "Asia/Tokyo":[35.7,139.7], "Asia/Seoul":[37.6,127.0],
+  "Asia/Jakarta":[-6.2,106.8], "Asia/Manila":[14.6,121.0],
+  "Australia/Perth":[-31.9,115.9], "Australia/Sydney":[-33.9,151.2], "Australia/Brisbane":[-27.5,153.0],
+  "Australia/Melbourne":[-37.8,145.0], "Pacific/Auckland":[-36.8,174.8],
+};
+
+// Best guess at where we are: the time zone if we know it, otherwise the UTC
+// offset gives us a longitude and we assume a mid-northern latitude.
+function guessPosition(){
+  let tz = "";
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch(e){}
+  if (TZ_POINTS[tz]) return TZ_POINTS[tz];
+  // getTimezoneOffset() is minutes *behind* local time, so UTC-5 gives 300.
+  const lon = -new Date().getTimezoneOffset() / 4;
+  return [20, Math.max(-180, Math.min(180, lon))];
+}
+
+// Great-circle distance in km.
+function haversine(aLat, aLon, bLat, bLon){
+  const R = 6371, rad = Math.PI/180;
+  const dLat = (bLat-aLat)*rad, dLon = (bLon-aLon)*rad;
+  const s = Math.sin(dLat/2)**2
+          + Math.cos(aLat*rad)*Math.cos(bLat*rad)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+function nearestLang(){
+  const [lat, lon] = guessPosition();
+  let best = "en", bestD = Infinity;
+  for (const a of LANG_ANCHORS){
+    const d = haversine(lat, lon, a.lat, a.lon);
+    if (d < bestD){ bestD = d; best = a.lang; }
+  }
+  return best;
+}
+
+const LANG_STORE = "animalandia_lang";
+let LANG = (() => {
+  // ?lang=es / ?lang=en wins, then a saved choice, then the distance rule
+  try {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q === "es" || q === "en"){ localStorage.setItem(LANG_STORE, q); return q; }
+  } catch(e){}
+  try {
+    const saved = localStorage.getItem(LANG_STORE);
+    if (saved === "es" || saved === "en") return saved;
+  } catch(e){}
+  return nearestLang();
+})();
+
+function setLang(l){
+  LANG = l;
+  try { localStorage.setItem(LANG_STORE, l); } catch(e){}
+  document.documentElement.lang = l;
+}
+
+// Spanish strings, keyed by the English original so the game data can stay as-is.
+const ES = {
+  // signs — jungle
+  "DOWN IN THE JUNGLE →":"ABAJO EN LA SELVA →",
+  "JUMP OVER!":"¡SALTA POR ENCIMA!",
+  "ROLLING LOGS!":"¡TRONCOS RODANTES!",
+  "QUICKSAND — JUMP IT!":"ARENAS MOVEDIZAS — ¡SÁLTALAS!",
+  "POISON RIVER!":"¡RÍO VENENOSO!",
+  "BOUNCE OVER THE VOLCANO!":"¡REBOTA SOBRE EL VOLCÁN!",
+  "JUMP OVER, DUCK UNDER!":"¡SALTA ARRIBA, AGÁCHATE ABAJO!",
+  "RACE THE GECKO!":"¡CORRE CONTRA EL GECO!",
+  // signs — ice
+  "THE ICY WAY →":"EL CAMINO HELADO →",
+  "DUCK — SNOWBALLS!":"¡AGÁCHATE — BOLAS DE NIEVE!",
+  "JUMP THE FIRES!":"¡SALTA LAS FOGATAS!",
+  "DODGE THE ICICLES!":"¡ESQUIVA LOS CARÁMBANOS!",
+  "SLIPPERY — JUMP THE ICE CUBES!":"RESBALOSO — ¡SALTA LOS CUBOS DE HIELO!",
+  "JUMP THE ICE SPIKES!":"¡SALTA LOS PICOS DE HIELO!",
+  "3 SECONDS EACH — KEEP MOVING!":"¡3 SEGUNDOS CADA UNO — NO TE PARES!",
+  "DUCK UNDER THE CLOUDS!":"¡AGÁCHATE BAJO LAS NUBES!",
+  "JUMP THE HOLES!":"¡SALTA LOS HOYOS!",
+  "CLIMB THE ICE BLOCKS!":"¡ESCALA LOS BLOQUES DE HIELO!",
+  "RACE THE HUSKY!":"¡CORRE CONTRA EL HUSKY!",
+  // levels
+  "Down in the Jungle":"Abajo en la Selva",
+  "Rolling logs, quicksand, a poison river and an erupting volcano!":
+    "¡Troncos rodantes, arenas movedizas, un río venenoso y un volcán en erupción!",
+  "The Icy Way":"El Camino Helado",
+  "Snowballs, fires, a freezing cave and melting ice platforms!":
+    "¡Bolas de nieve, fogatas, una cueva congelada y plataformas de hielo que se derriten!",
+  // characters
+  "Tiger":"Tigre", "Octopus":"Pulpo", "Fish":"Pez",
+  "Fastest of all! Run fast before you JUMP for a huge pounce.":
+    "¡El más veloz! Corre rápido antes de SALTAR para dar un zarpazo enorme.",
+  "Can't jump — tap INK to dash! Climbs walls and oozes through danger.":
+    "¡No salta — toca TINTA para impulsarte! Escala paredes y se escurre del peligro.",
+  "Slow flopping on land, super fast in water — find water every 10 seconds!":
+    "Lento en tierra, rapidísimo en el agua — ¡busca agua cada 10 segundos!",
+  // racers
+  "gecko":"geco", "husky":"husky",
+  // in-game HUD and controls
+  "FINISH":"META", "READY":"LISTO", "INK":"TINTA", "JUMP":"SALTA", "DUCK":"AGACHA",
+  // title screen
+  "Pick a level, pick an animal, and race!":"¡Elige un nivel, elige un animal y a correr!",
+  "PLAY":"JUGAR",
+  "Drag to move   ·   JUMP   ·   hold DUCK":"Arrastra para mover · SALTA · mantén AGACHA",
+  "← → move   SPACE jump   ↓ duck   P pause   M mute":
+    "← → mover   ESPACIO saltar   ↓ agachar   P pausa   M silencio",
+  "Created by Mateo":"Creado por Mateo",
+  // level select
+  "Pick a level!":"¡Elige un nivel!",
+  "🔒 COMING SOON":"🔒 MUY PRONTO",
+  "🏆 HIGH SCORES":"🏆 MEJORES TIEMPOS",
+  "🔒 LOCKED":"🔒 BLOQUEADO",
+  "GO!":"¡VAMOS!",
+  "BACK":"ATRÁS",
+  "The Icy Way is still being built!":"¡El Camino Helado todavía se está construyendo!",
+  // character select
+  "Pick your animal!":"¡Elige tu animal!",
+  "Speed":"Rapidez", "Jump":"Salto", "Swim":"Nado",
+  // high scores
+  "🏆 HIGH SCORES 🏆":"🏆 MEJORES TIEMPOS 🏆",
+  "No times yet — you could be the first!":"¡Aún no hay tiempos — puedes ser el primero!",
+  "CLEAR TIMES":"BORRAR TIEMPOS",
+  "High scores cleared!":"¡Tiempos borrados!",
+  // countdown
+  "Ready…":"Preparados…", "GO":"¡YA!",
+  // end screens
+  "🎉 YOU WIN! 🎉":"🎉 ¡GANASTE! 🎉",
+  "Your time:":"Tu tiempo:",
+  "🏆 NEW BEST TIME! 🏆":"🏆 ¡NUEVO RÉCORD! 🏆",
+  "So close!":"¡Por poquito!",
+  "PLAY AGAIN":"JUGAR OTRA VEZ",
+  "CHOOSE LEVEL":"ELEGIR NIVEL",
+  // pause
+  "⏸ Paused":"⏸ Pausa",
+  "KEEP PLAYING":"SEGUIR JUGANDO",
+};
+
+// Translate a string; unknown strings fall through unchanged.
+function T(s){ return LANG === "es" ? (ES[s] !== undefined ? ES[s] : s) : s; }
+
+// Sentences that need a value dropped into them.
+function tRankMsg(rank){
+  return LANG === "es"
+    ? "⭐ ¡MEJOR TIEMPO — eres el #" + (rank+1) + "! ⭐"
+    : "⭐ HIGH SCORE — you're #" + (rank+1) + "! ⭐";
+}
+function tLoseMsg(name, emoji){
+  return LANG === "es"
+    ? "¡El " + T(name) + " ganó esta vez " + emoji + " — inténtalo otra vez!"
+    : "The " + name + " won this time " + emoji + " — try again!";
+}
+
+document.documentElement.lang = LANG;
+document.title = "Animalandia";
+
+// ------------------------------------------------------------------
 // Characters
 // ------------------------------------------------------------------
 // faceDir = the direction the emoji art naturally points (-1 left, 1 right/front).
@@ -79,16 +265,41 @@ const CHARS = [
 ];
 
 // ------------------------------------------------------------------
-// Level: "Down in the Jungle"
+// Themes — each level repaints the world with its own colours
 // ------------------------------------------------------------------
-const LEVEL_NAME = "Down in the Jungle";
-const SCORE_KEY = "animalandia_scores_jungle";
+const THEMES = {
+  jungle: {
+    skyTop:"#5fc3cf", skyMid:"#9fdcb0", skyBottom:"#d6f0bd",
+    hillFar:"#4b8f47", hillNear:"#3a7838",
+    canopy:"#2f6b31", vine:"#397d3a", vineLeaf:"#4f9b45",
+    dirt:"#6b4a2a", grass:"#3f8f3a", grassDark:"#2f7a2c",
+    water:"rgba(70,170,230,0.62)", refill:"water",
+    trees:"palm", dimTint:"6,26,10",
+  },
+  ice: {
+    skyTop:"#5f9fd0", skyMid:"#b6d9f0", skyBottom:"#eaf6ff",
+    hillFar:"#dceefb", hillNear:"#c2ddee",
+    canopy:"#d8ecfa", vine:"#a8cbe2", vineLeaf:"#f0f9ff",
+    dirt:"#6d7d8e", grass:"#f4faff", grassDark:"#cfe2f0",
+    water:"rgba(90,190,235,0.60)", refill:"ice",
+    trees:"pine", dimTint:"10,24,38",
+  },
+};
 
-const START_LINE = 5600;
-const FINISH_LINE = 6950;
-const WORLD_END = 7350;
+// ------------------------------------------------------------------
+// Levels
+// ------------------------------------------------------------------
+const WATER_H = 30;
+const ERUPT_INTERVAL = 180;   // volcano: 3 seconds between eruptions
+const ERUPT_WARN = 45;        // the crater glows this long before it blows
+const FIRE_R = 12;
+const ICICLE_TOP = 150;      // cave roof the icicles hang from
+const ICICLE_PERIOD = 150;   // frames between one drop and the next
+const MELT_TIME = 180;       // 3 seconds standing on an ice platform
+const MELT_REGROW = 150;     // and how long before it freezes back
+const SNOW_R = 16;
 
-const SOLIDS = [
+const JUNGLE_SOLIDS = [
   // ground, split either side of the poison river
   { x:-200, y:GROUND_Y, w:3400, h:300, type:"ground" },
   { x:3290, y:GROUND_Y, w:4700, h:300, type:"ground" },
@@ -105,7 +316,7 @@ const SOLIDS = [
   { x:4960, y:415, w:80, h:55, type:"leaf" },
 ];
 
-const HAZARDS = [
+const JUNGLE_HAZARDS = [
   // quicksand pits, each with a puddle just before it to launch from
   { x:2310, y:452, w:80, h:24, kind:"quicksand" },
   { x:2570, y:452, w:80, h:24, kind:"quicksand" },
@@ -119,7 +330,7 @@ const HAZARDS = [
 
 // shallow jungle pools: harmless to everyone, but the fish refills its air
 // and swims fast through them. Spaced so a fish is never 10s from water.
-const WATERS = [
+const JUNGLE_WATERS = [
   { x:60,   w:500 },  // the water path you start in
   { x:1000, w:120 },
   { x:1150, w:730 },  // the water path — the logs come rolling down this stream
@@ -135,19 +346,9 @@ const WATERS = [
   { x:6300, w:110 },
   { x:6700, w:110 },
 ];
-const WATER_H = 30;
-
-// rolling logs: spawn on the right of the zone and roll left, 1 second apart
-const LOG_ZONE = { x0:1140, x1:1860, speed:2.4, interval:105, w:74, h:46 };
-
-// the volcano throws fireballs out of its crater every 3 seconds
-const VOLCANO = SOLIDS.find(s => s.type === "volcano");
-const ERUPT_INTERVAL = 180;   // 3 seconds
-const ERUPT_WARN = 45;        // the crater glows this long before it blows
-const FIRE_R = 12;
 
 // checkpoints: {trigger x, respawn x}
-const CHECKPOINTS = [
+const JUNGLE_CHECKPOINTS = [
   { tx:800,  rx:800 },
   { tx:1160, rx:1160 },
   { tx:2200, rx:2200 },
@@ -159,7 +360,7 @@ const CHECKPOINTS = [
   { tx:5450, rx:5450 },
 ];
 
-const SIGNS = [
+const JUNGLE_SIGNS = [
   { x:220,  text:"DOWN IN THE JUNGLE →" },
   { x:770,  text:"JUMP OVER!" },
   { x:1180, text:"ROLLING LOGS!" },
@@ -171,11 +372,187 @@ const SIGNS = [
 ];
 
 // decorative jungle trees
-const TREES = [
+const JUNGLE_TREES = [
   { x:120 }, { x:430 }, { x:960 }, { x:1420 }, { x:1900 }, { x:2180 },
   { x:2500 }, { x:2980 }, { x:3420 }, { x:4080 }, { x:4400 }, { x:5000 },
   { x:5320 }, { x:5850 }, { x:6300 }, { x:6700 }, { x:7000 },
 ];
+
+// ---- The Icy Way ----
+// Spacing rule learned the hard way: the tiger's pounce carries ~250px, so any two
+// obstacles it has to jump separately sit at least 250px apart, or it lands on the next one.
+const ICE_SOLIDS = [
+  // ground, with a crevasse cut out of it for the ice platforms
+  { x:-200, y:GROUND_Y, w:6900, h:300, type:"ground" },
+  { x:7790, y:GROUND_Y, w:4650, h:300, type:"ground" },
+  // crevasse floor — the octopus walks along the bottom and climbs out the far side
+  { x:6700, y:530, w:1090, h:60, type:"ground" },
+  // melting ice platforms across the crevasse: 3 seconds each, then they drop away.
+  // Wide slabs with short gaps, so a full tiger pounce still lands on the next one.
+  { x:6750, y:400, w:170, h:22, type:"melt" },
+  { x:7015, y:400, w:170, h:22, type:"melt" },
+  { x:7280, y:400, w:170, h:22, type:"melt" },
+  { x:7545, y:400, w:170, h:22, type:"melt" },
+  // ice block staircase
+  { x:9790, y:420, w:130, h:50,  type:"iceblock" },
+  { x:9920, y:370, w:130, h:100, type:"iceblock" },
+  { x:10050, y:320, w:130, h:150, type:"iceblock" },
+  { x:10180, y:270, w:130, h:200, type:"iceblock" },
+];
+
+const ICE_HAZARDS = [
+  // camp fires — jump over them
+  { x:2200, y:412, w:60, h:58, kind:"fire" },
+  { x:2500, y:412, w:60, h:58, kind:"fire" },
+  { x:2800, y:412, w:60, h:58, kind:"fire" },
+  { x:3100, y:412, w:60, h:58, kind:"fire" },
+  { x:3400, y:412, w:60, h:58, kind:"fire" },
+  // ice cubes sitting on the rink — jump over or go back
+  { x:4850, y:420, w:50, h:50, kind:"icecube" },
+  { x:5150, y:420, w:50, h:50, kind:"icecube" },
+  { x:5450, y:420, w:50, h:50, kind:"icecube" },
+  // ice spikes on the way out of the cave
+  { x:5850, y:440, w:44, h:30, kind:"icespike" },
+  { x:6100, y:440, w:44, h:30, kind:"icespike" },
+  { x:6350, y:440, w:44, h:30, kind:"icespike" },
+  // freezing water at the bottom of the crevasse
+  { x:6700, y:486, w:1090, h:80, kind:"freeze" },
+  // low clouds — hold DUCK or you are sent back
+  { x:8040, y:380, w:100, h:56, kind:"cloud" },
+  { x:8290, y:380, w:100, h:56, kind:"cloud" },
+  { x:8540, y:380, w:100, h:56, kind:"cloud" },
+  // holes in the ice rink
+  { x:8940, y:452, w:64, h:24, kind:"hole" },
+  { x:9190, y:452, w:64, h:24, kind:"hole" },
+  { x:9440, y:452, w:64, h:24, kind:"hole" },
+];
+
+// On this level the fish tops up on patches of ice instead of water (Mateo's note).
+const ICE_PATCHES = [
+  { x:100,   w:420 },  // the icy start
+  { x:900,   w:160 },
+  { x:1500,  w:160 },
+  { x:2000,  w:150 },  // before the fires
+  { x:2300,  w:100 },  // a launch pad between each fire
+  { x:2600,  w:100 },
+  { x:2900,  w:100 },
+  { x:3200,  w:100 },
+  { x:3520,  w:160 },
+  { x:3760,  w:130 },  // into the cave
+  { x:4650,  w:1000 }, // the ice rink itself
+  { x:5690,  w:100 },  // launch pad for the ice spikes
+  { x:5960,  w:120 },
+  { x:6200,  w:120 },
+  { x:6420,  w:150 },
+  { x:6600,  w:90 },   // launch pad for the ice platforms
+  { x:7810,  w:140 },  // out of the crevasse
+  { x:8190,  w:100 },  // between the clouds
+  { x:8440,  w:100 },
+  { x:8790,  w:800 },  // the holed rink
+  { x:9640,  w:130 },  // before the staircase
+  { x:10340, w:150 },  // after the staircase
+  { x:10640, w:120 },
+  { x:11040, w:120 },  // along the race straight
+  { x:11490, w:120 },
+];
+
+// stretches where the ground is polished ice and you slide
+const ICE_RINKS = [ { x:4650, w:1000 }, { x:8790, w:800 } ];
+
+// icicles hanging from the cave roof: they shiver, drop, shatter and grow back
+const ICE_ICICLES = [
+  { x:3900, phase:0 }, { x:4080, phase:45 }, { x:4260, phase:90 }, { x:4440, phase:135 },
+];
+
+const ICE_CHECKPOINTS = [
+  { tx:360,   rx:360 },
+  { tx:2060,  rx:2060 },
+  { tx:3720,  rx:3720 },
+  { tx:4600,  rx:4600 },
+  { tx:5700,  rx:5700 },
+  { tx:6600,  rx:6600 },
+  { tx:7890,  rx:7890 },
+  { tx:8690,  rx:8690 },
+  { tx:9660,  rx:9660 },
+  { tx:10440, rx:10440 },
+];
+
+const ICE_SIGNS = [
+  { x:200,   text:"THE ICY WAY →" },
+  { x:430,   text:"DUCK — SNOWBALLS!" },
+  { x:2120,  text:"JUMP THE FIRES!" },
+  { x:3780,  text:"DODGE THE ICICLES!" },
+  { x:4660,  text:"SLIPPERY — JUMP THE ICE CUBES!" },
+  { x:5760,  text:"JUMP THE ICE SPIKES!" },
+  { x:6660,  text:"3 SECONDS EACH — KEEP MOVING!" },
+  { x:7950,  text:"DUCK UNDER THE CLOUDS!" },
+  { x:8750,  text:"JUMP THE HOLES!" },
+  { x:9720,  text:"CLIMB THE ICE BLOCKS!" },
+  { x:10440, text:"RACE THE HUSKY!" },
+];
+
+// snowy pines, kept out of the cave and the crevasse
+const ICE_TREES = [
+  { x:150 }, { x:700 }, { x:1300 }, { x:1800 }, { x:2400 }, { x:3000 }, { x:3550 },
+  { x:7940 }, { x:8390 }, { x:8640 },
+  { x:9690 }, { x:10390 }, { x:10840 }, { x:11240 }, { x:11640 }, { x:12040 },
+];
+
+const LEVELS = [
+  {
+    name:"Down in the Jungle", icon:"🌴",
+    blurb:"Rolling logs, quicksand, a poison river and an erupting volcano!",
+    scoreKey:"animalandia_scores_jungle",
+    theme:THEMES.jungle,
+    startLine:5600, finishLine:6950, worldEnd:7350,
+    // rolling logs: spawn on the right of the zone and roll left, 1 second apart
+    logZone:{ x0:1140, x1:1860, speed:2.4, interval:105, w:74, h:46 },
+    racer:{ name:"gecko", emoji:"🦎", faceDir:-1, size:52, w:58, h:44 },
+    solids:JUNGLE_SOLIDS, hazards:JUNGLE_HAZARDS, waters:JUNGLE_WATERS,
+    checkpoints:JUNGLE_CHECKPOINTS, signs:JUNGLE_SIGNS, trees:JUNGLE_TREES,
+  },
+  {
+    name:"The Icy Way", icon:"🧊",
+    blurb:"Snowballs, fires, a freezing cave and melting ice platforms!",
+    scoreKey:"animalandia_scores_ice",
+    theme:THEMES.ice,
+    startLine:10490, finishLine:11840, worldEnd:12240,
+    logZone:null,
+    racer:{ name:"husky", emoji:"🐺", faceDir:-1, size:54, w:58, h:46 },
+    // snowballs come flying down the valley every 4 seconds — duck under them!
+    snowZone:{ x0:400, x1:1900, interval:240, speed:4.2, y:424, r:16 },
+    cave:{ x0:3700, x1:6500 },
+    icicles:ICE_ICICLES,
+    rinks:ICE_RINKS,
+    solids:ICE_SOLIDS, hazards:ICE_HAZARDS, waters:ICE_PATCHES,
+    checkpoints:ICE_CHECKPOINTS, signs:ICE_SIGNS, trees:ICE_TREES,
+  },
+];
+
+// The engine reads these plain vars; loadLevel() swaps in the chosen level.
+let levelIndex = 0, currentLevel = null;
+let SOLIDS, HAZARDS, WATERS, CHECKPOINTS, SIGNS, TREES, LOG_ZONE, VOLCANO, THEME;
+let RINKS, SNOW_ZONE, ICICLES, CAVE, RACER, MELTS;
+let START_LINE, FINISH_LINE, WORLD_END;
+
+function loadLevel(i){
+  levelIndex = i;
+  const L = currentLevel = LEVELS[i];
+  SOLIDS = L.solids; HAZARDS = L.hazards; WATERS = L.waters;
+  CHECKPOINTS = L.checkpoints; SIGNS = L.signs; TREES = L.trees;
+  LOG_ZONE = L.logZone || null;
+  // the volcano throws fireballs out of its crater every few seconds
+  VOLCANO = L.solids.find(s => s.type === "volcano") || null;
+  MELTS = L.solids.filter(s => s.type === "melt");
+  RINKS = L.rinks || [];
+  SNOW_ZONE = L.snowZone || null;
+  ICICLES = L.icicles || [];
+  CAVE = L.cave || null;
+  RACER = L.racer;
+  THEME = L.theme;
+  START_LINE = L.startLine; FINISH_LINE = L.finishLine; WORLD_END = L.worldEnd;
+}
+loadLevel(0);
 
 // ------------------------------------------------------------------
 // Input — keyboard
@@ -355,6 +732,9 @@ const sfx = {
   boing:   () => { beep(300,0.08,"sine",0.12); setTimeout(()=>beep(720,0.12,"sine",0.11),55); },
   erupt:   () => { beep(90,0.32,"sawtooth",0.13); setTimeout(()=>beep(150,0.22,"sawtooth",0.10),90); },
   burn:    () => { beep(240,0.16,"sawtooth",0.14); setTimeout(()=>beep(150,0.2,"sawtooth",0.12),80); },
+  crack:   () => { beep(1400,0.05,"square",0.08); setTimeout(()=>beep(1100,0.06,"square",0.07),70); },
+  shatter: () => { beep(1600,0.05,"triangle",0.09); setTimeout(()=>beep(2100,0.05,"triangle",0.07),50); },
+  whoosh:  () => beep(300, 0.12, "sine", 0.07),
   select:  () => beep(700, 0.08, "triangle", 0.12),
 };
 
@@ -406,13 +786,16 @@ const Music = {
 // High scores — top 10 fastest runs, kept in localStorage
 // ------------------------------------------------------------------
 const Leaderboard = {
-  KEY: SCORE_KEY, _mem: [],
-  load(){
-    try { return JSON.parse(localStorage.getItem(this.KEY)) || []; }
-    catch(e){ return this._mem; }
+  _mem: {},
+  get KEY(){ return currentLevel.scoreKey; },
+  keyFor(i){ return LEVELS[i].scoreKey; },
+  loadKey(key){
+    try { return JSON.parse(localStorage.getItem(key)) || []; }
+    catch(e){ return this._mem[key] || []; }
   },
+  load(){ return this.loadKey(this.KEY); },
   save(list){
-    this._mem = list;
+    this._mem[this.KEY] = list;
     try { localStorage.setItem(this.KEY, JSON.stringify(list)); } catch(e){}
   },
   add(timeMs, ch){
@@ -424,14 +807,17 @@ const Leaderboard = {
     this.save(list.slice(0, 10));
     return rank < 10 ? rank : -1;
   },
-  reset(){ this._mem = []; try { localStorage.removeItem(this.KEY); } catch(e){} },
+  resetKey(key){ this._mem[key] = []; try { localStorage.removeItem(key); } catch(e){} },
+  reset(){ this.resetKey(this.KEY); },
 };
 
 // ------------------------------------------------------------------
 // Game state
 // ------------------------------------------------------------------
-let state = "title"; // title | pick | scores | playing | countdown | race | win | lose | paused
+let state = "title"; // title | levels | pick | scores | playing | countdown | race | win | lose | paused
 let prevState = "playing";
+let scoresFrom = "levels";   // where the BACK button on the scores page returns to
+let scoresLevel = 0;         // which level's high scores the scores page is showing
 let pickIndex = 0;
 let cameraX = 0;
 let tGlobal = 0;
@@ -443,6 +829,9 @@ let logs = [];       // rolling logs
 let logSpawn = 0;
 let fireballs = [];  // volcano eruption
 let eruptTimer = ERUPT_INTERVAL;
+let snowballs = []; // snowballs flying down the icy valley
+let snowTimer = 0;
+let shards = [];    // shattered icicle / ice bits
 
 const player = {
   x: 80, y: GROUND_Y - PH, w: PW, h: PH,
@@ -479,6 +868,11 @@ function resetPlayer(ch){
   inkParts.length = 0;
   logs.length = 0; logSpawn = 0;
   fireballs.length = 0; eruptTimer = ERUPT_INTERVAL;
+  snowballs.length = 0; snowTimer = SNOW_ZONE ? SNOW_ZONE.interval : 0;
+  shards.length = 0;
+  for (const ic of ICICLES){ ic.t = -(ic.phase || 0); ic.y = ICICLE_TOP; ic.vy = 0; ic.falling = false; }
+  for (const m of MELTS){ m.timer = -1; m.broken = false; m.regrow = 0; }
+  gecko.w = RACER.w; gecko.h = RACER.h;
   gecko.x = START_LINE - 90; gecko.y = GROUND_Y - gecko.h;
   raceStarted = false;
   runMs = 0; lastRank = -1;
@@ -505,6 +899,7 @@ function collideX(){
   player.blockedLeft = player.blockedRight = false;
   player.x += player.vx;
   for (const s of SOLIDS){
+    if (s.broken) continue;
     if (overlaps(player, s)){
       // step assist: walk straight up onto very low things (the trampoline)
       const rise = player.y + player.h - s.y;
@@ -523,6 +918,7 @@ function collideY(){
   player.grounded = false; player.standing = null;
   player.y += player.vy;
   for (const s of SOLIDS){
+    if (s.broken) continue;
     if (overlaps(player, s)){
       if (player.vy > 0){ player.y = s.y - player.h; player.grounded = true; player.standing = s; }
       else if (player.vy < 0){ player.y = s.y + s.h; }
@@ -530,6 +926,14 @@ function collideY(){
     }
   }
   if (player.grounded && !wasGrounded && player.vy === 0) sfx.land();
+}
+
+// is the player standing on a patch of polished ice rink?
+function onRink(){
+  if (!RINKS.length || !player.grounded) return false;
+  const cx = player.x + player.w/2;
+  for (const r of RINKS) if (cx >= r.x && cx <= r.x + r.w) return true;
+  return false;
 }
 
 // which pool (if any) the player is standing in
@@ -612,7 +1016,7 @@ function updatePlayer(allowInput){
     }
     player.facing = dir;
   } else {
-    player.vx *= 0.85;
+    player.vx *= onRink() ? 0.975 : 0.85;   // polished ice keeps you sliding
     if (Math.abs(player.vx) < 0.05) player.vx = 0;
   }
 
@@ -708,6 +1112,12 @@ function updatePlayer(allowInput){
     }
   }
 
+  // --- melting ice platforms: 3 seconds once you put a foot on one ---
+  if (player.grounded && player.standing && player.standing.type === "melt"){
+    const m = player.standing;
+    if (m.timer < 0){ m.timer = MELT_TIME; sfx.crack(); }
+  }
+
   // --- spider-web trampoline ---
   if (player.grounded && player.standing && player.standing.type === "web"){
     player.vy = -BOUNCE_VY;
@@ -719,9 +1129,12 @@ function updatePlayer(allowInput){
   // --- hazards (the octopus oozes through all of them) ---
   if (!a.tough){
     for (const hz of HAZARDS){
-      if (hz.kind === "lowleaf" && player.ducking) continue;  // ducked = you slip underneath
+      // ducked = you slip underneath the low leaves and the low clouds
+      if ((hz.kind === "lowleaf" || hz.kind === "cloud") && player.ducking) continue;
       if (overlaps(player, hz)){
-        if (hz.kind === "poison") sfx.splash(); else sfx.bump();
+        if (hz.kind === "poison" || hz.kind === "freeze" || hz.kind === "hole") sfx.splash();
+        else if (hz.kind === "fire") sfx.burn();
+        else sfx.bump();
         respawn();
         return;
       }
@@ -733,6 +1146,29 @@ function updatePlayer(allowInput){
     for (const f of fireballs){
       if (overlaps(player, { x:f.x-FIRE_R, y:f.y-FIRE_R, w:FIRE_R*2, h:FIRE_R*2 })){
         sfx.burn();
+        respawn();
+        return;
+      }
+    }
+  }
+
+  // --- snowballs: duck under them or they knock you back ---
+  if (!a.tough && !player.ducking){
+    for (const sb of snowballs){
+      if (overlaps(player, { x:sb.x-SNOW_R, y:sb.y-SNOW_R, w:SNOW_R*2, h:SNOW_R*2 })){
+        sfx.bump();
+        respawn();
+        return;
+      }
+    }
+  }
+
+  // --- falling icicles ---
+  if (!a.tough){
+    for (const ic of ICICLES){
+      if (!ic.falling) continue;
+      if (overlaps(player, { x:ic.x-9, y:ic.y, w:18, h:46 })){
+        sfx.bump();
         respawn();
         return;
       }
@@ -775,6 +1211,7 @@ function splash(x, y, n){
 // Rolling logs
 // ------------------------------------------------------------------
 function updateLogs(){
+  if (!LOG_ZONE) return;
   logSpawn--;
   if (logSpawn <= 0){
     logs.push({ x: LOG_ZONE.x1, y: GROUND_Y - LOG_ZONE.h });
@@ -788,6 +1225,7 @@ function updateLogs(){
 // Volcano
 // ------------------------------------------------------------------
 function updateVolcano(){
+  if (!VOLCANO) return;
   eruptTimer--;
   if (eruptTimer <= 0){
     eruptTimer = ERUPT_INTERVAL;
@@ -806,6 +1244,67 @@ function updateVolcano(){
 }
 
 // ------------------------------------------------------------------
+// The Icy Way: snowballs, icicles and melting platforms
+// ------------------------------------------------------------------
+function updateSnow(){
+  if (!SNOW_ZONE) return;
+  snowTimer--;
+  if (snowTimer <= 0){
+    snowTimer = SNOW_ZONE.interval;
+    snowballs.push({ x: SNOW_ZONE.x1, y: SNOW_ZONE.y, spin: 0 });
+    if (Math.abs(player.x - SNOW_ZONE.x1) < 1200) sfx.whoosh();
+  }
+  for (const sb of snowballs){ sb.x -= SNOW_ZONE.speed; sb.spin += 0.22; }
+  if (snowballs.length) snowballs = snowballs.filter(sb => sb.x > SNOW_ZONE.x0 - 140);
+}
+
+function updateIcicles(){
+  for (const ic of ICICLES){
+    ic.t++;
+    if (ic.falling){
+      ic.vy += 0.5; ic.y += ic.vy;
+      if (ic.y > GROUND_Y - 30){
+        // shatter on the cave floor and start growing back
+        for (let i = 0; i < 7; i++){
+          shards.push({ x: ic.x, y: GROUND_Y - 10,
+            vx:(Math.random()-0.5)*4, vy:-1.5 - Math.random()*2.5,
+            life:0, max:22 + Math.random()*10, r:2 + Math.random()*3 });
+        }
+        if (Math.abs(player.x - ic.x) < 700) sfx.shatter();
+        ic.falling = false; ic.y = ICICLE_TOP; ic.vy = 0; ic.t = 0;
+      }
+    } else if (ic.t > ICICLE_PERIOD){
+      ic.falling = true; ic.vy = 0;
+    }
+  }
+}
+
+function updateMelts(){
+  for (const m of MELTS){
+    if (m.broken){
+      m.regrow--;
+      if (m.regrow <= 0){ m.broken = false; m.timer = -1; }
+    } else if (m.timer > 0){
+      m.timer--;
+      if (m.timer === 0){
+        m.broken = true; m.regrow = MELT_REGROW;
+        sfx.shatter();
+        for (let i = 0; i < 10; i++){
+          shards.push({ x: m.x + Math.random()*m.w, y: m.y + 10,
+            vx:(Math.random()-0.5)*3, vy: Math.random()*1.5,
+            life:0, max:26 + Math.random()*10, r:2.5 + Math.random()*3 });
+        }
+      }
+    }
+  }
+}
+
+function updateShards(){
+  for (const sh of shards){ sh.x += sh.vx; sh.y += sh.vy; sh.vy += 0.28; sh.life++; }
+  if (shards.length) shards = shards.filter(sh => sh.life < sh.max);
+}
+
+// ------------------------------------------------------------------
 // Update dispatch
 // ------------------------------------------------------------------
 function update(){
@@ -820,6 +1319,10 @@ function update(){
   if (state === "playing" || state === "countdown" || state === "race"){
     updateLogs();
     updateVolcano();
+    updateSnow();
+    updateIcicles();
+    updateMelts();
+    updateShards();
   }
 
   if (state === "playing"){
@@ -884,30 +1387,57 @@ function handleEdges(){
   if (toastT > 0) toastT--;
   if (muteEdge){ muted = !muted; muteEdge = false; }
   if (uiTap === "mute"){ muted = !muted; uiTap = null; }
-  if (resetEdge){ Leaderboard.reset(); lastRank = -1; setToast("High scores cleared!"); sfx.check(); resetEdge = false; }
-  if (uiTap === "reset"){ Leaderboard.reset(); lastRank = -1; setToast("High scores cleared!"); sfx.check(); uiTap = null; }
+  if (resetEdge || uiTap === "reset"){
+    // on the scores page this clears the level being shown, otherwise the one in play
+    Leaderboard.resetKey(state === "scores" ? LEVELS[scoresLevel].scoreKey : Leaderboard.KEY);
+    lastRank = -1; setToast(T("High scores cleared!")); sfx.check();
+    resetEdge = false; if (uiTap === "reset") uiTap = null;
+  }
+
+  if (uiTap === "lang"){ setLang(LANG === "es" ? "en" : "es"); sfx.select(); uiTap = null; }
 
   const confirm = confirmEdge || uiTap === "play" || uiTap === "go" || uiTap === "again";
   const wantScores = scoresEdge || uiTap === "scores";
   const back = uiTap === "back";
 
+  // a high-scores button on a level card carries that level's index
+  if (uiTap && uiTap.startsWith("hs")){
+    scoresLevel = +uiTap.slice(2);
+    scoresFrom = "levels"; state = "scores"; sfx.select();
+    uiTap = null;
+  }
+
   if (state === "title"){
-    if (confirm){ state = "pick"; sfx.select(); }
-    else if (wantScores){ prevState = "title"; state = "scores"; sfx.select(); }
+    if (confirm){ state = "levels"; sfx.select(); }
+  } else if (state === "levels"){
+    if (leftEdge){ levelIndex = (levelIndex - 1 + LEVELS.length) % LEVELS.length; sfx.select(); }
+    if (rightEdge){ levelIndex = (levelIndex + 1) % LEVELS.length; sfx.select(); }
+    if (uiTap && uiTap.startsWith("lvl")){ levelIndex = +uiTap.slice(3); sfx.select(); }
+    else if (back){ state = "title"; sfx.select(); }
+    else if (confirm){
+      if (LEVELS[levelIndex].comingSoon){
+        setToast(T("The Icy Way is still being built!"));
+        sfx.bump();
+      } else {
+        loadLevel(levelIndex); pickIndex = 0; state = "pick"; sfx.select();
+      }
+    }
   } else if (state === "scores"){
-    if (confirm || back || wantScores){ state = prevState === "title" ? "title" : "pick"; sfx.select(); }
+    if (confirm || back || wantScores){ state = scoresFrom; sfx.select(); }
   } else if (state === "pick"){
     if (leftEdge || uiTap === "prev"){ pickIndex = (pickIndex - 1 + CHARS.length) % CHARS.length; sfx.select(); }
     if (rightEdge || uiTap === "next"){ pickIndex = (pickIndex + 1) % CHARS.length; sfx.select(); }
     if (uiTap && uiTap.startsWith("card")){ pickIndex = +uiTap.slice(4); sfx.select(); }
+    else if (back){ state = "levels"; sfx.select(); }
     else if (confirm){ resetPlayer(CHARS[pickIndex]); state = "playing"; sfx.go(); }
-    else if (wantScores){ prevState = "pick"; state = "scores"; sfx.select(); }
+    else if (wantScores){ scoresLevel = levelIndex; scoresFrom = "pick"; state = "scores"; sfx.select(); }
   } else if (playing()){
     if (pauseEdge){ prevState = state; state = "paused"; }
   } else if (state === "paused"){
     if (pauseEdge || confirm || uiTap === "resume"){ state = prevState; }
   } else if (state === "win" || state === "lose"){
-    if (wantScores){ prevState = "pick"; state = "scores"; sfx.select(); }
+    if (wantScores){ scoresLevel = levelIndex; scoresFrom = "pick"; state = "scores"; sfx.select(); }
+    else if (uiTap === "levels"){ state = "levels"; sfx.select(); }
     else if (confirm || leftEdge || rightEdge){ state = "pick"; sfx.select(); }
   }
 
@@ -933,7 +1463,7 @@ function centerText(text, y, size, color="#fff", weight="bold"){
   ctx.font = `${weight} ${size}px 'Comic Sans MS', sans-serif`;
   ctx.fillText(text, W/2, y);
 }
-function dim(alpha){ ctx.fillStyle = `rgba(6,26,10,${alpha})`; ctx.fillRect(0,0,W,H); }
+function dim(alpha){ ctx.fillStyle = `rgba(${THEME.dimTint},${alpha})`; ctx.fillRect(0,0,W,H); }
 function formatTime(ms){
   const s = ms/1000, m = Math.floor(s/60), sec = s - m*60;
   return m + ":" + (sec < 10 ? "0" : "") + sec.toFixed(1);
@@ -944,18 +1474,18 @@ function formatTime(ms){
 // ------------------------------------------------------------------
 function drawBackground(){
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,"#5fc3cf"); g.addColorStop(0.55,"#9fdcb0"); g.addColorStop(1,"#d6f0bd");
+  g.addColorStop(0,THEME.skyTop); g.addColorStop(0.55,THEME.skyMid); g.addColorStop(1,THEME.skyBottom);
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  // far jungle canopy
-  ctx.fillStyle = "#4b8f47";
+  // far hills
+  ctx.fillStyle = THEME.hillFar;
   for (let i=-1;i<9;i++){
     const hx = i*380 - (cameraX*0.25 % 380);
     ctx.beginPath();
     ctx.arc(hx+150, GROUND_Y+30, 210, Math.PI, 0);
     ctx.fill();
   }
-  ctx.fillStyle = "#3a7838";
+  ctx.fillStyle = THEME.hillNear;
   for (let i=-1;i<11;i++){
     const hx = i*280 - (cameraX*0.45 % 280);
     ctx.beginPath();
@@ -964,14 +1494,31 @@ function drawBackground(){
   }
 
   // leafy canopy along the top of the screen, with hanging vines
-  ctx.fillStyle = "#2f6b31";
+  ctx.fillStyle = THEME.canopy;
   for (let i=-1;i<13;i++){
     const cx = i*160 - (cameraX*0.15 % 160);
     ctx.beginPath();
     ctx.arc(cx+60, 6, 62, 0, Math.PI);
     ctx.fill();
   }
-  ctx.strokeStyle = "#397d3a"; ctx.lineWidth = 5; ctx.lineCap = "round";
+  if (THEME.trees === "pine"){
+    // icicles hanging off the snowy overhang instead of jungle vines
+    for (let i=0;i<14;i++){
+      const vx = i*160 - (cameraX*0.15 % 160) + 30;
+      const len = 30 + (i%5)*22;
+      ctx.fillStyle = THEME.vineLeaf;
+      ctx.beginPath();
+      ctx.moveTo(vx - 8, 14); ctx.lineTo(vx + 8, 14); ctx.lineTo(vx, 14 + len);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.beginPath();
+      ctx.moveTo(vx - 3, 18); ctx.lineTo(vx + 1, 18); ctx.lineTo(vx - 1, 18 + len*0.55);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.lineCap = "butt";
+    return;
+  }
+  ctx.strokeStyle = THEME.vine; ctx.lineWidth = 5; ctx.lineCap = "round";
   for (let i=0;i<10;i++){
     const vx = i*230 - (cameraX*0.15 % 230) + 40;
     const len = 60 + (i%4)*46;
@@ -980,7 +1527,7 @@ function drawBackground(){
     ctx.moveTo(vx, 20);
     ctx.quadraticCurveTo(vx + sway, 20 + len*0.6, vx + sway*1.6, 20 + len);
     ctx.stroke();
-    ctx.fillStyle = "#4f9b45";
+    ctx.fillStyle = THEME.vineLeaf;
     ctx.beginPath();
     ctx.ellipse(vx + sway*1.6, 22 + len, 7, 13, sway*0.02, 0, 7);
     ctx.fill();
@@ -992,14 +1539,37 @@ function drawTrees(){
   for (let i=0;i<TREES.length;i++){
     const x = worldX(TREES[i].x);
     if (x < -110 || x > W+110) continue;
+    if (CAVE && TREES[i].x > CAVE.x0 - 60 && TREES[i].x < CAVE.x1 + 60) continue;
     const bend = Math.sin(tGlobal*0.02 + i)*4;
-    // trunk
+    if (THEME.trees === "pine"){
+      // snowy pine
+      ctx.fillStyle = "#6b4a34";
+      ctx.fillRect(x - 7, GROUND_Y - 46, 14, 46);
+      for (let tier = 0; tier < 3; tier++){
+        const ty = GROUND_Y - 58 - tier*38;
+        const half = 54 - tier*13;
+        ctx.fillStyle = tier % 2 ? "#2f6b48" : "#387a52";
+        ctx.beginPath();
+        ctx.moveTo(x + bend*(tier+1)*0.3, ty - 52);
+        ctx.lineTo(x + half, ty);
+        ctx.lineTo(x - half, ty);
+        ctx.closePath(); ctx.fill();
+        // snow cap on each tier
+        ctx.fillStyle = "#f4faff";
+        ctx.beginPath();
+        ctx.moveTo(x + bend*(tier+1)*0.3, ty - 52);
+        ctx.lineTo(x + half*0.55, ty - 18);
+        ctx.lineTo(x - half*0.55, ty - 18);
+        ctx.closePath(); ctx.fill();
+      }
+      continue;
+    }
+    // jungle palm
     ctx.strokeStyle = "#7b5230"; ctx.lineWidth = 14; ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(x, GROUND_Y);
     ctx.quadraticCurveTo(x + bend, GROUND_Y-70, x + bend*2, GROUND_Y-130);
     ctx.stroke();
-    // palm fronds
     const tx = x + bend*2, ty = GROUND_Y-130;
     ctx.fillStyle = i % 3 === 1 ? "#3f8f3a" : "#4fa347";
     for (let f=0; f<6; f++){
@@ -1022,11 +1592,11 @@ function drawSolid(s){
   const x = worldX(s.x), y = s.y;
   if (x + s.w < -60 || x > W+60) return;
   if (s.type === "ground"){
-    ctx.fillStyle = "#6b4a2a";
+    ctx.fillStyle = THEME.dirt;
     ctx.fillRect(x, y, s.w, s.h);
-    ctx.fillStyle = "#3f8f3a";
+    ctx.fillStyle = THEME.grass;
     ctx.fillRect(x, y, s.w, 14);
-    ctx.fillStyle = "#2f7a2c";
+    ctx.fillStyle = THEME.grassDark;
     for (let gx = (Math.floor(cameraX/24)*24 - cameraX); gx < W; gx += 24){
       if (gx >= x && gx <= x + s.w) ctx.fillRect(gx, y+10, 3, 6);
     }
@@ -1091,6 +1661,59 @@ function drawSolid(s){
       ctx.arc(x + s.w/2 + Math.sin(t*0.05 + i)*22, y - 14 - t*0.55, 12 + t*0.09, 0, 7);
       ctx.fill();
     }
+  } else if (s.type === "melt"){
+    if (s.broken){
+      // ghost outline showing where it will freeze back
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2;
+      ctx.setLineDash([7, 7]);
+      rr(x, y, s.w, s.h, 6); ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
+    const cracking = s.timer > 0;
+    const shake = cracking && s.timer < 60 ? Math.sin(tGlobal*0.9)*2 : 0;
+    ctx.save();
+    ctx.translate(shake, 0);
+    // pillar under the ice cap, like Mateo drew them
+    ctx.fillStyle = "#9fc8e2";
+    ctx.fillRect(x + s.w/2 - 13, y + s.h, 26, GROUND_Y - (y + s.h));
+    ctx.fillStyle = cracking ? "#dbeefb" : "#eaf6ff";
+    rr(x, y, s.w, s.h, 7); ctx.fill();
+    ctx.strokeStyle = "#6fa8cc"; ctx.lineWidth = 3;
+    rr(x, y, s.w, s.h, 7); ctx.stroke();
+    if (cracking){
+      // cracks spread as the three seconds run out
+      const f = 1 - s.timer / MELT_TIME;
+      ctx.strokeStyle = "rgba(60,110,150," + (0.35 + f*0.55).toFixed(2) + ")";
+      ctx.lineWidth = 2;
+      for (let i = 1; i <= 3; i++){
+        const cx2 = x + (s.w/4)*i;
+        ctx.beginPath();
+        ctx.moveTo(cx2, y + 2);
+        ctx.lineTo(cx2 - 7*f, y + s.h/2);
+        ctx.lineTo(cx2 + 6*f, y + s.h - 2);
+        ctx.stroke();
+      }
+      // countdown pips
+      const left = Math.ceil(s.timer / 60);
+      for (let i = 0; i < 3; i++){
+        ctx.fillStyle = i < left ? "#2f7fc4" : "rgba(80,120,150,0.3)";
+        ctx.beginPath(); ctx.arc(x + s.w/2 - 16 + i*16, y - 12, 4.5, 0, 7); ctx.fill();
+      }
+    }
+    ctx.restore();
+  } else if (s.type === "iceblock"){
+    ctx.fillStyle = "#cfe8f7";
+    rr(x, y, s.w, s.h, 6); ctx.fill();
+    ctx.fillStyle = "#eaf6ff";
+    ctx.fillRect(x + 3, y + 3, s.w - 6, 10);
+    ctx.strokeStyle = "#6fa8cc"; ctx.lineWidth = 3;
+    rr(x, y, s.w, s.h, 6); ctx.stroke();
+    // block seams
+    ctx.strokeStyle = "rgba(111,168,204,0.55)"; ctx.lineWidth = 2;
+    for (let by = y + 50; by < y + s.h; by += 50){
+      ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + s.w, by); ctx.stroke();
+    }
   } else if (s.type === "leaf"){
     // big floating leaf you hop over
     const bob = Math.sin(tGlobal*0.05 + s.x)*3;
@@ -1119,7 +1742,26 @@ function drawWater(){
   for (const wt of WATERS){
     const x = worldX(wt.x), y = GROUND_Y - WATER_H;
     if (x + wt.w < -40 || x > W+40) continue;
-    ctx.fillStyle = "rgba(70,170,230,0.62)";
+    if (THEME.refill === "ice"){
+      // sheet ice: the fish tops up on this instead of water
+      ctx.fillStyle = "rgba(214,240,253,0.92)";
+      ctx.fillRect(x, y, wt.w, WATER_H + 14);
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(x, y, wt.w, 5);
+      ctx.strokeStyle = "rgba(120,180,215,0.65)"; ctx.lineWidth = 2;
+      for (let i = 18; i < wt.w - 8; i += 46){
+        ctx.beginPath();
+        ctx.moveTo(x+i, y+9); ctx.lineTo(x+i+16, y+19); ctx.lineTo(x+i+7, y+29);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      for (let i=0;i<3;i++){
+        const sx = x + ((i*67 + tGlobal*0.5) % Math.max(20, wt.w));
+        ctx.beginPath(); ctx.arc(sx, y + 12 + Math.sin(tGlobal*0.07+i)*3, 2.2, 0, 7); ctx.fill();
+      }
+      continue;
+    }
+    ctx.fillStyle = THEME.water;
     ctx.fillRect(x, y, wt.w, WATER_H + 14);
     ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -1176,7 +1818,95 @@ function drawHazard(hz){
       const by = y + hz.h - ((tGlobal*1.1 + i*37) % hz.h);
       ctx.beginPath(); ctx.arc(bx, by, 3 + (i%2), 0, 7); ctx.fill();
     }
-  } else if (hz.kind === "lowleaf"){
+  } else if (hz.kind === "fire"){
+    // logs plus dancing flames
+    ctx.fillStyle = "#7b5230";
+    ctx.save(); ctx.translate(x + hz.w/2, y + hz.h - 8);
+    ctx.rotate(0.3); ctx.fillRect(-hz.w/2, -5, hz.w, 10);
+    ctx.rotate(-0.6); ctx.fillRect(-hz.w/2, -5, hz.w, 10);
+    ctx.restore();
+    for (let i = 0; i < 3; i++){
+      const fx = x + hz.w/2 + (i-1)*13;
+      const fl = 22 + Math.sin(tGlobal*0.25 + i*1.7)*8;
+      ctx.fillStyle = ["#ff5a1e","#ff8b2b","#ffd24d"][i];
+      ctx.beginPath();
+      ctx.moveTo(fx, y + hz.h - 14 - fl);
+      ctx.quadraticCurveTo(fx + 11, y + hz.h - 18, fx + 7, y + hz.h - 12);
+      ctx.quadraticCurveTo(fx, y + hz.h - 6, fx - 7, y + hz.h - 12);
+      ctx.quadraticCurveTo(fx - 11, y + hz.h - 18, fx, y + hz.h - 14 - fl);
+      ctx.fill();
+    }
+  } else if (hz.kind === "icecube"){
+    ctx.fillStyle = "rgba(210,238,252,0.92)";
+    rr(x, y, hz.w, hz.h, 7); ctx.fill();
+    ctx.strokeStyle = "#6fa8cc"; ctx.lineWidth = 3;
+    rr(x, y, hz.w, hz.h, 7); ctx.stroke();
+    // shine
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    rr(x + 8, y + 7, 13, 6, 3); ctx.fill();
+    ctx.strokeStyle = "rgba(111,168,204,0.5)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x + hz.w - 12, y + 9); ctx.lineTo(x + hz.w - 12, y + hz.h - 9); ctx.stroke();
+  } else if (hz.kind === "icespike"){
+    ctx.fillStyle = "#8fd4f5";
+    const n = 3;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++){
+      const sx = x + i*(hz.w/n);
+      ctx.moveTo(sx, y + hz.h);
+      ctx.lineTo(sx + hz.w/(2*n), y);
+      ctx.lineTo(sx + hz.w/n, y + hz.h);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#3f86b8"; ctx.lineWidth = 2; ctx.stroke();
+  } else if (hz.kind === "freeze"){
+    ctx.fillStyle = "rgba(60,120,190,0.72)";
+    ctx.fillRect(x, y, hz.w, hz.h);
+    ctx.strokeStyle = "rgba(220,245,255,0.8)"; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let i = 0; i < hz.w; i += 24){
+      const wob = Math.sin(tGlobal*0.07 + i*0.05)*3;
+      ctx.moveTo(x+i, y+5+wob);
+      ctx.quadraticCurveTo(x+i+12, y-3+wob, x+i+24, y+5+wob);
+    }
+    ctx.stroke();
+    // floating ice floes
+    ctx.fillStyle = "rgba(235,250,255,0.85)";
+    for (let i = 0; i < 5; i++){
+      const fx = x + 40 + ((i*173 + tGlobal*0.25) % Math.max(40, hz.w - 80));
+      rr(fx, y + 6 + Math.sin(tGlobal*0.05+i)*3, 40, 9, 4); ctx.fill();
+    }
+  } else if (hz.kind === "hole"){
+    // a hole punched clean through the ice rink
+    ctx.fillStyle = "#123b5c";
+    ctx.beginPath(); ctx.ellipse(x + hz.w/2, y + hz.h/2, hz.w/2, hz.h/2 + 4, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#dceefb"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(x + hz.w/2, y + hz.h/2, hz.w/2, hz.h/2 + 4, 0, 0, 7); ctx.stroke();
+    ctx.fillStyle = "rgba(90,170,220,0.65)";
+    ctx.beginPath(); ctx.ellipse(x + hz.w/2, y + hz.h/2 + 3, hz.w/2 - 8, hz.h/2 - 2, 0, 0, 7); ctx.fill();
+  } else if (hz.kind === "cloud" || hz.kind === "lowleaf"){
+    if (hz.kind === "cloud"){
+      // a heavy low snow cloud — duck under it
+      const bob = Math.sin(tGlobal*0.04 + hz.x)*4;
+      ctx.fillStyle = "#b9cfe0";
+      ctx.beginPath();
+      ctx.arc(x + 24, y + hz.h - 20 + bob, 24, 0, 7);
+      ctx.arc(x + hz.w/2, y + hz.h - 30 + bob, 30, 0, 7);
+      ctx.arc(x + hz.w - 24, y + hz.h - 20 + bob, 24, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = "#d8e8f4";
+      ctx.beginPath();
+      ctx.arc(x + 34, y + hz.h - 32 + bob, 15, 0, 7);
+      ctx.arc(x + hz.w - 34, y + hz.h - 30 + bob, 12, 0, 7);
+      ctx.fill();
+      // a little snow falling out of it
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      for (let i = 0; i < 4; i++){
+        const sx = x + 18 + i*((hz.w - 36)/3);
+        const sy = y + hz.h - 6 + ((tGlobal*1.4 + i*23) % 26);
+        ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 7); ctx.fill();
+      }
+      return;
+    }
     // heavy leaf cluster hanging from a vine — duck under it
     const bob = Math.sin(tGlobal*0.045 + hz.x)*3;
     ctx.strokeStyle = "#397d3a"; ctx.lineWidth = 5;
@@ -1247,6 +1977,105 @@ function drawFireballs(){
   }
 }
 
+function drawSnowballs(){
+  for (const sb of snowballs){
+    const x = worldX(sb.x);
+    if (x < -60 || x > W+60) continue;
+    ctx.save();
+    // motion streaks, like Mateo drew
+    ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    for (let i = 0; i < 3; i++){
+      ctx.beginPath();
+      ctx.moveTo(x + SNOW_R + 8, sb.y - 8 + i*8);
+      ctx.lineTo(x + SNOW_R + 22 + i*7, sb.y - 8 + i*8);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+    ctx.translate(x, sb.y);
+    ctx.rotate(sb.spin);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(0, 0, SNOW_R, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#a8c8dd"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 0, SNOW_R, 0, 7); ctx.stroke();
+    ctx.fillStyle = "#dcecf7";
+    ctx.beginPath(); ctx.arc(-4, 4, 5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(5, -3, 3.5, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawIcicles(){
+  for (const ic of ICICLES){
+    const x = worldX(ic.x);
+    if (x < -50 || x > W+50) continue;
+    const ready = !ic.falling && ic.t > ICICLE_PERIOD - 35;
+    const shake = ready ? Math.sin(tGlobal*1.1)*2.5 : 0;
+    ctx.save();
+    ctx.translate(x + shake, ic.y);
+    ctx.fillStyle = ready ? "#bfe8ff" : "#9fd6f2";
+    ctx.beginPath();
+    ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.lineTo(0, 46);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#4f95c4"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    ctx.moveTo(-3.5, 4); ctx.lineTo(0.5, 4); ctx.lineTo(-1, 28);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawShards(){
+  for (const sh of shards){
+    const f = sh.life / sh.max;
+    ctx.fillStyle = "rgba(225,245,255," + ((1-f)*0.9).toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(worldX(sh.x), sh.y, sh.r, 0, 7); ctx.fill();
+  }
+}
+
+// the frozen cave the ice rink sits inside
+function drawCave(){
+  if (!CAVE) return;
+  const x0 = worldX(CAVE.x0), x1 = worldX(CAVE.x1);
+  if (x1 < -80 || x0 > W+80) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(Math.max(-80, x0), 0, Math.min(W+80, x1) - Math.max(-80, x0), GROUND_Y);
+  ctx.clip();
+  // rock wall behind everything
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  g.addColorStop(0, "#2b3d4f"); g.addColorStop(1, "#4a6277");
+  ctx.fillStyle = g; ctx.fillRect(-100, 0, W+200, GROUND_Y);
+  // a lumpy roof with hanging stalactites
+  ctx.fillStyle = "#22333f";
+  ctx.beginPath();
+  ctx.moveTo(-100, 0); ctx.lineTo(W+100, 0); ctx.lineTo(W+100, 96);
+  for (let i = 12; i >= 0; i--){
+    const sx = -100 + i*((W+200)/12);
+    ctx.lineTo(sx + 40, 96 + (i%2 ? 40 : 14));
+    ctx.lineTo(sx, 96);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // frosty mouths at each end
+  for (const [mx, dir] of [[x0, 1], [x1, -1]]){
+    if (mx < -140 || mx > W+140) continue;
+    ctx.save();
+    ctx.fillStyle = "#1c2b36";
+    ctx.beginPath();
+    ctx.moveTo(mx, GROUND_Y);
+    ctx.quadraticCurveTo(mx, 150, mx + dir*70, 150);
+    ctx.lineTo(mx + dir*70, GROUND_Y);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#d8ecfa"; ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(mx, GROUND_Y);
+    ctx.quadraticCurveTo(mx, 150, mx + dir*70, 150);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function drawSigns(){
   ctx.save();
   ctx.textAlign = "center";
@@ -1255,14 +2084,16 @@ function drawSigns(){
     if (x < -160 || x > W+160) continue;
     ctx.fillStyle = "#8a5a2b";
     ctx.fillRect(x-3, GROUND_Y-70, 6, 70);
-    const w = Math.max(90, sg.text.length*9);
+    // measure the translated text so longer Spanish signs still fit the board
+    const label = T(sg.text);
+    ctx.font = "bold 15px 'Comic Sans MS', sans-serif";
+    const w = Math.max(90, ctx.measureText(label).width + 24);
     ctx.fillStyle = "#f7e2b0";
     rr(x-w/2, GROUND_Y-110, w, 40, 8); ctx.fill();
     ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth=3;
     rr(x-w/2, GROUND_Y-110, w, 40, 8); ctx.stroke();
     ctx.fillStyle = "#5a3a16";
-    ctx.font = "bold 15px 'Comic Sans MS', sans-serif";
-    ctx.fillText(sg.text, x, GROUND_Y-84);
+    ctx.fillText(label, x, GROUND_Y-84);
   }
   ctx.restore();
 }
@@ -1299,7 +2130,7 @@ function drawStartFinish(){
     ctx.fillStyle = "#222";
     ctx.font = "bold 18px 'Comic Sans MS', sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("FINISH", x+34, GROUND_Y-100);
+    ctx.fillText(T("FINISH"), x+34, GROUND_Y-100);
   }
 }
 
@@ -1351,11 +2182,11 @@ function drawPlayer(){
   }
 }
 
-function drawGecko(){
+function drawRacer(){
   const cx = worldX(gecko.x + gecko.w/2);
   const cy = gecko.y + gecko.h/2;
   const bob = (state === "race") ? Math.abs(Math.sin(gecko.anim))*5 : 0;
-  drawCharacter("🦎", cx, cy, 52, 1, -1, bob, 1);
+  drawCharacter(RACER.emoji, cx, cy, RACER.size, 1, RACER.faceDir, bob, 1);
 }
 
 // ------------------------------------------------------------------
@@ -1370,7 +2201,7 @@ function drawHUD(){
   ctx.fillText(player.ch.emoji, 22, 33);
   ctx.fillStyle = "#234";
   ctx.font = "bold 15px 'Comic Sans MS', sans-serif";
-  ctx.fillText(player.ch.name, 56, 33);
+  ctx.fillText(T(player.ch.name), 56, 33);
 
   const px = 120, pw = 110;
   ctx.fillStyle = "#cfd6dd"; rr(px, 24, pw, 14, 7); ctx.fill();
@@ -1393,7 +2224,7 @@ function drawHUD(){
     rr(288, 24, 72 * frac, 14, 7); ctx.fill();
     if (ready){
       ctx.fillStyle = "#2c8a3e"; ctx.font = "bold 10px 'Comic Sans MS', sans-serif";
-      ctx.textAlign = "center"; ctx.fillText("READY", 324, 31);
+      ctx.textAlign = "center"; ctx.fillText(T("READY"), 324, 31);
     }
   }
 
@@ -1472,7 +2303,7 @@ function drawTouchControls(){
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = "bold 19px 'Comic Sans MS', sans-serif";
-  ctx.fillText(inkMode ? "INK" : "JUMP", BTN_JUMP.cx, BTN_JUMP.cy);
+  ctx.fillText(inkMode ? T("INK") : T("JUMP"), BTN_JUMP.cx, BTN_JUMP.cy);
 
   ctx.globalAlpha = touch.duckDown ? 1 : 0.85;
   ctx.fillStyle = touch.duckDown ? "#ffd24d" : "#3f7fc4";
@@ -1481,7 +2312,7 @@ function drawTouchControls(){
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#fff";
   ctx.font = "bold 17px 'Comic Sans MS', sans-serif";
-  ctx.fillText("DUCK", BTN_DUCK.cx, BTN_DUCK.cy);
+  ctx.fillText(T("DUCK"), BTN_DUCK.cx, BTN_DUCK.cy);
 
   ctx.restore();
 }
@@ -1507,14 +2338,16 @@ function drawToast(){
   if (toastT <= 0) return;
   ctx.save();
   ctx.globalAlpha = Math.min(1, toastT/18);
-  const w = 290, h = 46;
+  // low while playing, high on the menus so it never sits on top of the buttons
+  const ty = playing() ? H - 74 : 8;
+  const w = 320, h = 44;
   ctx.fillStyle = "rgba(12,32,18,0.92)";
-  rr(W/2 - w/2, H - 74, w, h, 12); ctx.fill();
+  rr(W/2 - w/2, ty, w, h, 12); ctx.fill();
   ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2;
-  rr(W/2 - w/2, H - 74, w, h, 12); ctx.stroke();
+  rr(W/2 - w/2, ty, w, h, 12); ctx.stroke();
   ctx.fillStyle = "#ffe14d"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = "bold 18px 'Comic Sans MS', sans-serif";
-  ctx.fillText(toast, W/2, H - 51);
+  ctx.fillText(toast, W/2, ty + h/2);
   ctx.restore();
 }
 
@@ -1528,20 +2361,86 @@ function drawTitle(){
     ctx.fillText(e, x, y);
   });
   ctx.save();
-  centerText("ANIMALANDIA", 120, 68, "#fff");
+  centerText("ANIMALANDIA", 140, 68, "#fff");
   ctx.strokeStyle = "#1d5a24"; ctx.lineWidth=5;
-  ctx.strokeText("ANIMALANDIA", W/2, 120);
-  centerText(LEVEL_NAME, 178, 34, "#ffe14d");
-  ctx.strokeStyle = "#7a5a00"; ctx.lineWidth=3; ctx.strokeText(LEVEL_NAME, W/2, 178);
+  ctx.strokeText("ANIMALANDIA", W/2, 140);
   ctx.restore();
-  centerText("Pick an animal and race the gecko!", 224, 20, "#123", "bold");
+  centerText(T("Pick a level, pick an animal, and race!"), 200, 20, "#123", "bold");
 
-  bigButton("play", W/2, 268, 260, 60, "PLAY");
-  bigButton("scores", W/2, 340, 260, 52, "HIGH SCORES", "#3f7fc4", 22);
+  bigButton("play", W/2, 292, 280, 68, T("PLAY"), "#41c75a", 30);
+  bigButton("lang", W - 86, 40, 132, 38, LANG === "es" ? "ENGLISH" : "ESPAÑOL", "#3f7fc4", 16);
 
-  centerText(touchMode ? "Drag to move   ·   JUMP   ·   hold DUCK"
-                       : "← → move   SPACE jump   ↓ duck   P pause   M mute", 464, 16, "#eff", "");
-  centerText("Created by Mateo", 506, 20, "#ffe14d");
+  centerText(touchMode ? T("Drag to move   ·   JUMP   ·   hold DUCK")
+                       : T("← → move   SPACE jump   ↓ duck   P pause   M mute"), 464, 16, "#eff", "");
+  centerText(T("Created by Mateo"), 506, 20, "#ffe14d");
+}
+
+function drawLevels(){
+  // preview the highlighted level's own colours behind the cards
+  const keep = THEME;
+  THEME = LEVELS[levelIndex].theme;
+  drawBackground();
+  dim(0.34);
+  THEME = keep;
+
+  centerText(T("Pick a level!"), 54, 38, "#fff");
+
+  const n = LEVELS.length;
+  const cardW = 300, gap = 44, cardH = 236;
+  const totalW = n*cardW + (n-1)*gap;
+  const x0 = (W - totalW)/2;
+  for (let i=0;i<n;i++){
+    const L = LEVELS[i];
+    const x = x0 + i*(cardW+gap);
+    const sel = i === levelIndex;
+    const y = 104 + (sel ? -10 : 0);
+    const locked = !!L.comingSoon;
+    ctx.save();
+    ctx.fillStyle = locked ? "rgba(225,228,232,0.78)"
+                           : (sel ? "#fff5d6" : "rgba(255,255,255,0.82)");
+    rr(x, y, cardW, cardH, 16); ctx.fill();
+    ctx.strokeStyle = sel ? "#ffb300" : "#9aa"; ctx.lineWidth = sel ? 6 : 3;
+    rr(x, y, cardW, cardH, 16); ctx.stroke();
+
+    ctx.textAlign = "center";
+    const bob = sel ? Math.sin(tGlobal*0.12)*6 : 0;
+    ctx.globalAlpha = locked ? 0.55 : 1;
+    ctx.font = "72px 'Segoe UI Emoji', sans-serif";
+    ctx.fillText(L.icon, x + cardW/2, y + 92 + bob);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = "#234"; ctx.font = "bold 25px 'Comic Sans MS',sans-serif";
+    ctx.fillText(T(L.name), x + cardW/2, y + 148);
+
+    // blurb, wrapped to the card
+    ctx.fillStyle = locked ? "#667" : "#456";
+    ctx.font = "13px 'Comic Sans MS',sans-serif";
+    const words = T(L.blurb).split(" ");
+    let line = "", ly = y + 178;
+    for (const wd of words){
+      const test = line ? line + " " + wd : wd;
+      if (ctx.measureText(test).width > cardW - 36 && line){
+        ctx.fillText(line, x + cardW/2, ly); line = wd; ly += 18;
+      } else line = test;
+    }
+    if (line) ctx.fillText(line, x + cardW/2, ly);
+
+    if (locked){
+      ctx.fillStyle = "#8a6a2e"; ctx.font = "bold 15px 'Comic Sans MS',sans-serif";
+      ctx.fillText(T("🔒 COMING SOON"), x + cardW/2, y + cardH - 14);
+    }
+    ctx.restore();
+    uiButton("lvl"+i, x, y, cardW, cardH);
+
+    // every level carries its own high-scores button
+    bigButton("hs"+i, x + cardW/2, 392, cardW, 44, T("🏆 HIGH SCORES"), "#3f7fc4", 19);
+  }
+
+  if (LEVELS[levelIndex].comingSoon)
+    bigButton("go", W/2 - 96, 480, 210, 52, T("🔒 LOCKED"), "#98a2ac", 22);
+  else
+    bigButton("go", W/2 - 96, 480, 210, 52, T("GO!"));
+  bigButton("back", W/2 + 150, 480, 180, 44, T("BACK"), "#7a8a99", 20);
 }
 
 function statBar(x,y,label,frac){
@@ -1557,7 +2456,8 @@ function statBar(x,y,label,frac){
 function drawPick(){
   drawBackground();
   dim(0.35);
-  centerText("Pick your animal!", 52, 38, "#fff");
+  centerText(T("Pick your animal!"), 44, 36, "#fff");
+  centerText(currentLevel.icon + "  " + T(currentLevel.name), 78, 19, "#ffe14d");
   const n = CHARS.length;
   const cardW = 200, gap = 26;
   const totalW = n*cardW + (n-1)*gap;
@@ -1581,30 +2481,34 @@ function drawPick(){
     ctx.fillText(c.emoji, 0, 0);
     ctx.restore();
     ctx.fillStyle = "#234"; ctx.font = "bold 22px 'Comic Sans MS',sans-serif";
-    ctx.fillText(c.name, x+cardW/2, y+142);
-    statBar(x+22, y+168, "Speed", c.run/4.8);
-    statBar(x+22, y+192, "Jump", c.jump/14);
-    statBar(x+22, y+216, "Swim", c.swim ? 1 : (c.tough ? 0.7 : 0.2));
+    ctx.fillText(T(c.name), x+cardW/2, y+142);
+    statBar(x+22, y+168, T("Speed"), c.run/4.8);
+    statBar(x+22, y+192, T("Jump"), c.jump/14);
+    statBar(x+22, y+216, T("Swim"), c.swim ? 1 : (c.tough ? 0.7 : 0.2));
     ctx.restore();
     uiButton("card"+i, x, y, cardW, 250);
   }
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   rr(W/2-330, 372, 660, 50, 12); ctx.fill();
-  centerText(CHARS[pickIndex].blurb, 397, 17, "#234", "bold");
+  centerText(T(CHARS[pickIndex].blurb), 397, 17, "#234", "bold");
 
-  bigButton("go", W/2 - 100, 468, 200, 52, "GO!");
-  bigButton("scores", W/2 + 130, 468, 220, 44, "HIGH SCORES", "#3f7fc4", 19);
+  bigButton("go", W/2 - 96, 468, 210, 52, T("GO!"));
+  bigButton("back", W/2 + 150, 468, 180, 44, T("BACK"), "#7a8a99", 20);
 }
 
 function drawScores(){
+  const L = LEVELS[scoresLevel];
+  const keep = THEME;
+  THEME = L.theme;
   drawBackground();
   dim(0.6);
+  THEME = keep;
   const cx = W/2;
-  centerText("🏆 HIGH SCORES 🏆", 60, 40, "#ffe14d");
-  centerText(LEVEL_NAME, 98, 20, "#cfe");
-  const list = Leaderboard.load();
+  centerText(T("🏆 HIGH SCORES 🏆"), 60, 40, "#ffe14d");
+  centerText(L.icon + "  " + T(L.name), 98, 20, "#cfe");
+  const list = Leaderboard.loadKey(L.scoreKey);
   if (list.length === 0){
-    centerText("No times yet — you could be the first!", 220, 22, "#fff");
+    centerText(T("No times yet — you could be the first!"), 220, 22, "#fff");
   } else {
     const rowH = 30, w = 460, y0 = 146;
     ctx.save();
@@ -1630,8 +2534,8 @@ function drawScores(){
     }
     ctx.restore();
   }
-  bigButton("back", W/2 - 110, 486, 200, 48, "BACK", "#41c75a", 24);
-  bigButton("reset", W/2 + 130, 486, 210, 40, "CLEAR TIMES", "#c25a5a", 17);
+  bigButton("back", W/2 - 110, 486, 200, 48, T("BACK"), "#41c75a", 24);
+  bigButton("reset", W/2 + 130, 486, 210, 40, T("CLEAR TIMES"), "#c25a5a", 17);
 }
 
 function drawCountdown(){
@@ -1639,7 +2543,7 @@ function drawCountdown(){
   if (countdownStep === 3) label = "3";
   else if (countdownStep === 2) label = "2";
   else if (countdownStep === 1) label = "1";
-  else label = "GO!";
+  else label = T("GO");
   ctx.save();
   const scale = 1 + (countdownTimer/50)*0.5;
   ctx.translate(W/2, 180);
@@ -1648,7 +2552,7 @@ function drawCountdown(){
   ctx.lineWidth=5; ctx.strokeStyle="#1d5a24";
   ctx.strokeText(label, 0, 0);
   ctx.restore();
-  centerText("Ready…", 90, 26, "#fff");
+  centerText(T("Ready…"), 90, 26, "#fff");
 }
 
 function drawEnd(win){
@@ -1661,11 +2565,10 @@ function drawEnd(win){
       ctx.fillStyle = ["#ff5a5a","#5aff8a","#5aa8ff","#ffe14d","#ff8ad8"][i%5];
       ctx.fillRect((i*47 + t)%W, (i*29 + t*1.3)%H, 7, 11);
     }
-    centerText("🎉 YOU WIN! 🎉", 70, 44, "#ffe14d");
-    centerText("Your time:  " + formatTime(lastTime), 118, 26, "#fff");
+    centerText(T("🎉 YOU WIN! 🎉"), 70, 44, "#ffe14d");
+    centerText(T("Your time:") + "  " + formatTime(lastTime), 118, 26, "#fff");
     if (lastRank >= 0){
-      const msg = lastRank === 0 ? "🏆 NEW BEST TIME! 🏆"
-                                 : "⭐ HIGH SCORE — you're #" + (lastRank+1) + "! ⭐";
+      const msg = lastRank === 0 ? T("🏆 NEW BEST TIME! 🏆") : tRankMsg(lastRank);
       const pulse = 1 + Math.sin(tGlobal*0.2)*0.07;
       ctx.save(); ctx.translate(cx, 176); ctx.scale(pulse, pulse);
       ctx.fillStyle = "#8fff5a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1673,11 +2576,12 @@ function drawEnd(win){
       ctx.fillText(msg, 0, 0); ctx.restore();
     }
   } else {
-    centerText("So close!", 80, 44, "#fff");
-    centerText("The gecko won this time 🦎 — try again!", 130, 24, "#ffd2d2");
+    centerText(T("So close!"), 80, 44, "#fff");
+    centerText(tLoseMsg(RACER.name, RACER.emoji), 130, 24, "#ffd2d2");
   }
-  bigButton("again", cx, 300, 300, 62, "PLAY AGAIN");
-  bigButton("scores", cx, 380, 300, 50, "HIGH SCORES", "#3f7fc4", 22);
+  bigButton("again", cx, 290, 300, 60, T("PLAY AGAIN"));
+  bigButton("scores", cx, 362, 300, 48, T("🏆 HIGH SCORES"), "#3f7fc4", 21);
+  bigButton("levels", cx, 428, 300, 44, T("CHOOSE LEVEL"), "#7a8a99", 19);
 }
 
 // ------------------------------------------------------------------
@@ -1686,20 +2590,25 @@ function drawEnd(win){
 function render(){
   uiButtons = [];
   if (state === "title"){ drawTitle(); drawToast(); return; }
+  if (state === "levels"){ drawLevels(); drawToast(); return; }
   if (state === "scores"){ drawScores(); drawToast(); return; }
   if (state === "pick"){ drawPick(); drawToast(); return; }
 
   drawBackground();
+  drawCave();
   drawTrees();
   for (const s of SOLIDS) drawSolid(s);
   drawWater();
   for (const hz of HAZARDS) drawHazard(hz);
   drawLogs();
   drawFireballs();
+  drawIcicles();
+  drawSnowballs();
+  drawShards();
   drawCheckpoints();
   drawStartFinish();
   drawSigns();
-  if (raceStarted) drawGecko();
+  if (raceStarted) drawRacer();
   drawParticles();
   drawPlayer();
   if (state !== "win" && state !== "lose") drawHUD();
@@ -1709,8 +2618,8 @@ function render(){
   if (state === "lose") drawEnd(false);
   if (state === "paused"){
     dim(0.55);
-    centerText("⏸ Paused", 190, 50, "#fff");
-    bigButton("resume", W/2, 290, 280, 60, "KEEP PLAYING");
+    centerText(T("⏸ Paused"), 190, 50, "#fff");
+    bigButton("resume", W/2, 290, 280, 60, T("KEEP PLAYING"));
   }
   // controls sit on top of everything, so the countdown never covers them
   if (playing()) drawTouchControls();
@@ -1735,6 +2644,21 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// TEMP dev hook for testing — remove before shipping
+window.__dev = {
+  get state(){ return state; }, set state(v){ state = v; },
+  player, gecko, CHARS, LEVELS, Leaderboard,
+  get runMs(){ return runMs; },
+  get SOLIDS(){ return SOLIDS; }, get HAZARDS(){ return HAZARDS; },
+  get WATERS(){ return WATERS; }, get MELTS(){ return MELTS; },
+  get ICICLES(){ return ICICLES; }, get snowballs(){ return snowballs; },
+  get LOG_ZONE(){ return LOG_ZONE; }, get logs(){ return logs; },
+  get FINISH(){ return FINISH_LINE; },
+  level(i){ loadLevel(i); },
+  pick(i){ resetPlayer(CHARS[i]); state = "playing"; },
+  tp(x){ player.x = x; player.y = GROUND_Y - PH - 10; player.vx = 0; player.vy = 0; },
+};
 
 })();
 </script>
